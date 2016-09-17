@@ -4,6 +4,9 @@
 #include "stdafx.h"
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
+bool Initialize();
+bool Update();
+void Finalize();
 
 /**
 * アプリケーションのエントリポイント.
@@ -65,6 +68,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prevInstance, PWSTR cmdLine, i
 	ShowWindow(hwnd, cmdShow);
 	UpdateWindow(hwnd);
 
+	if (!Initialize()) {
+		MessageBox(nullptr, L"DirectXの初期化に失敗", L"エラー", MB_OK | MB_ICONERROR);
+		return 0;
+	}
+
 	MSG msg = { 0 };
 	for (;;) {
 		if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -77,7 +85,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prevInstance, PWSTR cmdLine, i
 		}
 
 		// TODO: ここにアプリケーションのコードを書く.
+		Update();
 	}
+
+	Finalize();
 
 	return 0;
 }
@@ -115,4 +126,33 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		return 0;
 	}
 	return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+/**
+* DirectXの初期化.
+*
+* @retval true 初期化成功.
+* @retval false 初期化失敗.
+*/
+bool Initialize()
+{
+	return true;
+}
+
+/**
+* DirectXの破棄.
+*/
+void Finalize()
+{
+}
+
+/**
+* シーンの更新.
+*
+* @retval true ゲームを続ける.
+* @retval false ゲームを終了する.
+*/
+bool Update()
+{
+	return true;
 }
