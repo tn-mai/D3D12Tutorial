@@ -22,9 +22,10 @@ struct Direct3DStuff {
 	ComPtr<ID3D12Resource> renderTargetList[frameBufferCount];
 	ComPtr<ID3D12CommandAllocator> commandAllocator[frameBufferCount];
 	ComPtr<ID3D12GraphicsCommandList> commandList;
-	ComPtr<ID3D12Fence> fenceList[frameBufferCount];
+	ComPtr<ID3D12Fence> fence;
 	HANDLE fenceEvent;
-	UINT64 fenceValue[frameBufferCount];
+	UINT64 masterFenceValue;
+	UINT64 fenceValueForFrameBuffer[frameBufferCount];
 	int frameIndex;
 	int rtvDescriptorSize;
 };
@@ -103,6 +104,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prevInstance, PWSTR cmdLine, i
 	d3dStuff.hwnd = hwnd;
 	d3dStuff.running = true;
 	d3dStuff.initialized = false;
+	d3dStuff.masterFenceValue = 0;
 	d3dStuff.fenceEvent = nullptr;
 	if (!Initialize(d3dStuff)) {
 		MessageBox(nullptr, L"DirectXの初期化に失敗", L"エラー", MB_OK | MB_ICONERROR);
@@ -280,22 +282,19 @@ bool Init3D(Direct3DStuff& d3dStuff)
 
 	// フェンスとフェンスイベントを作成.
 	// DirectX 12では、GPUの描画終了を検出するためにフェンスというものを使う.
-	// フェンスはOSのイベントに関連付けることができるように設計されている.
-	// そこで、OSのイベントを作成しておき、実際にフェンスを設定するときに関連付けることにする.
-	// フェンスはコマンドキューに設置するが、ひとつのフェンスは１か所にしか設置できない.
-	// GPUの描画中は設置済みのフェンスを再利用できないため、バックバッファ毎にひとつのフェンスを用意する.
-	// 全てのフェンスが同時にイベントを起こすことはないため、イベントは使いわますことができる.
-	// そこで、イベントはひとつだけでよい.
-	for (int i = 0; i < d3dStuff.frameBufferCount; ++i) {
-		d3dStuff.fenceValue[i] = 0;
-		hr = d3dStuff.device->CreateFence(d3dStuff.fenceValue[i], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(d3dStuff.fenceList[i].GetAddressOf()));
-		if (FAILED(hr)) {
-			return false;
-		}
+	// フェンスはOSのイベントを関連付けることができるように設計されている.
+	// そこで、OSのイベントを作成し、フェンスをコマンドリストへ設定するときに関連付ける.
+	hr = d3dStuff.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(d3dStuff.fence.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
 	}
 	d3dStuff.fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 	if (!d3dStuff.fenceEvent) {
 		return false;
+	}
+	++d3dStuff.masterFenceValue;
+	for (int i = 0; i < d3dStuff.frameBufferCount; ++i) {
+		d3dStuff.fenceValueForFrameBuffer[i] = 0;
 	}
 
 	d3dStuff.initialized = true;
@@ -344,15 +343,15 @@ void Finalize(Direct3DStuff& d3dStuff)
 */
 void WaitForPreviousFrame(Direct3DStuff& d3dStuff)
 {
+	const UINT64 lastCompletedFence = d3dStuff.fence->GetCompletedValue();
 	d3dStuff.frameIndex = d3dStuff.swapChain->GetCurrentBackBufferIndex();
-	if (d3dStuff.fenceList[d3dStuff.frameIndex]->GetCompletedValue() < d3dStuff.fenceValue[d3dStuff.frameIndex]) {
-		HRESULT hr = d3dStuff.fenceList[d3dStuff.frameIndex]->SetEventOnCompletion(d3dStuff.fenceValue[d3dStuff.frameIndex], d3dStuff.fenceEvent);
+	if (d3dStuff.fenceValueForFrameBuffer[d3dStuff.frameIndex] > lastCompletedFence) {
+		HRESULT hr = d3dStuff.fence->SetEventOnCompletion(d3dStuff.fenceValueForFrameBuffer[d3dStuff.frameIndex], d3dStuff.fenceEvent);
 		if (FAILED(hr)) {
 			d3dStuff.running = false;
 		}
 		WaitForSingleObject(d3dStuff.fenceEvent, INFINITE);
 	}
-	++d3dStuff.fenceValue[d3dStuff.frameIndex];
 }
 
 /**
@@ -390,14 +389,17 @@ void Render(Direct3DStuff& d3dStuff)
 	// 描画開始.
 	ID3D12CommandList* commandListArray[] = { d3dStuff.commandList.Get() };
 	d3dStuff.commandQueue->ExecuteCommandLists(_countof(commandListArray), commandListArray);
-	hr = d3dStuff.commandQueue->Signal(d3dStuff.fenceList[d3dStuff.frameIndex].Get(), d3dStuff.fenceValue[d3dStuff.frameIndex]);
-	if (FAILED(hr)) {
-		d3dStuff.running = false;
-	}
 	hr = d3dStuff.swapChain->Present(1, 0);
 	if (FAILED(hr)) {
 		d3dStuff.running = false;
 	}
+
+	d3dStuff.fenceValueForFrameBuffer[d3dStuff.frameIndex] = d3dStuff.masterFenceValue;
+	hr = d3dStuff.commandQueue->Signal(d3dStuff.fence.Get(), d3dStuff.masterFenceValue);
+	if (FAILED(hr)) {
+		d3dStuff.running = false;
+	}
+	++d3dStuff.masterFenceValue;
 }
 
 /**
