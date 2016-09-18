@@ -310,6 +310,48 @@ void Finalize(Direct3DStuff&)
 }
 
 /**
+* 直前のフレームの描画完了を待つ.
+*/
+void WaitForPreviousFrame()
+{
+}
+
+/**
+* レンダリングパイプラインの更新.
+*/
+bool UpdatePipeline(Direct3DStuff& d3dStuff)
+{
+	WaitForPreviousFrame();
+
+	// コマンドリスト及びコマンドアロケータをリセット.
+	bool Running = true;
+	HRESULT hr;
+	hr = d3dStuff.commandAllocator[d3dStuff.frameIndex]->Reset();
+	if (FAILED(hr)) {
+		Running = false;
+	}
+	hr = d3dStuff.commandList->Reset(d3dStuff.commandAllocator[d3dStuff.frameIndex].Get(), nullptr);
+	if (FAILED(hr)) {
+		Running = false;
+	}
+
+	// コマンドを積んでいく.
+	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = d3dStuff.rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	rtvHandle.ptr += d3dStuff.frameIndex * d3dStuff.rtvDescriptorSize;
+	d3dStuff.commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+	static const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+	d3dStuff.commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+
+	hr = d3dStuff.commandList->Close();
+	if (FAILED(hr)) {
+		Running = false;
+	}
+}
+
+
+/**
 * シーンの更新.
 *
 * @retval true ゲームを続ける.
