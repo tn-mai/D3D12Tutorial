@@ -11,6 +11,8 @@ struct Direct3DStuff {
 	int witdh;
 	int height;
 	bool fullScreen;
+	bool running;
+	bool initialized;
 	HWND hwnd;
 
 	ComPtr<ID3D12Device> device;
@@ -29,8 +31,10 @@ struct Direct3DStuff {
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 bool Initialize(Direct3DStuff&);
-bool Update(Direct3DStuff&);
 void Finalize(Direct3DStuff&);
+void Update(Direct3DStuff&);
+void Render(Direct3DStuff&);
+void WaitForPreviousFrame(Direct3DStuff&);
 
 /**
 * アプリケーションのエントリポイント.
@@ -97,13 +101,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prevInstance, PWSTR cmdLine, i
 	d3dStuff.height = height;
 	d3dStuff.fullScreen = fullScreen;
 	d3dStuff.hwnd = hwnd;
+	d3dStuff.running = true;
+	d3dStuff.initialized = false;
+	d3dStuff.fenceEvent = nullptr;
 	if (!Initialize(d3dStuff)) {
 		MessageBox(nullptr, L"DirectXの初期化に失敗", L"エラー", MB_OK | MB_ICONERROR);
+		Finalize(d3dStuff);
 		return 0;
 	}
 
 	MSG msg = { 0 };
-	for (;;) {
+	while (d3dStuff.running) {
 		if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
 			if (msg.message == WM_QUIT) {
 				break;
@@ -115,6 +123,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prevInstance, PWSTR cmdLine, i
 
 		// TODO: ここにアプリケーションのコードを書く.
 		Update(d3dStuff);
+		Render(d3dStuff);
 	}
 
 	Finalize(d3dStuff);
@@ -285,6 +294,8 @@ bool Init3D(Direct3DStuff& d3dStuff)
 		return false;
 	}
 
+	d3dStuff.initialized = true;
+
 	return true;
 }
 
@@ -305,34 +316,57 @@ bool Initialize(Direct3DStuff& d3dStuff)
 /**
 * DirectXの破棄.
 */
-void Finalize(Direct3DStuff&)
+void Finalize(Direct3DStuff& d3dStuff)
 {
+	if (d3dStuff.initialized) {
+		for (int i = 0; i < d3dStuff.frameBufferCount; ++i) {
+			d3dStuff.frameIndex = i;
+			WaitForPreviousFrame(d3dStuff);
+		}
+
+		BOOL fs = FALSE;
+		if (d3dStuff.swapChain->GetFullscreenState(&fs, nullptr)) {
+			d3dStuff.swapChain->SetFullscreenState(false, nullptr);
+		}
+	}
+
+	if (d3dStuff.fenceEvent) {
+		CloseHandle(d3dStuff.fenceEvent);
+	}
 }
 
 /**
 * 直前のフレームの描画完了を待つ.
 */
-void WaitForPreviousFrame()
+void WaitForPreviousFrame(Direct3DStuff& d3dStuff)
 {
+	d3dStuff.frameIndex = d3dStuff.swapChain->GetCurrentBackBufferIndex();
+	if (d3dStuff.fenceList[d3dStuff.frameIndex]->GetCompletedValue() < d3dStuff.fenceValue[d3dStuff.frameIndex]) {
+		HRESULT hr = d3dStuff.fenceList[d3dStuff.frameIndex]->SetEventOnCompletion(d3dStuff.fenceValue[d3dStuff.frameIndex], d3dStuff.fenceEvent);
+		if (FAILED(hr)) {
+			d3dStuff.running = false;
+		}
+		WaitForSingleObject(d3dStuff.fenceEvent, INFINITE);
+	}
+	++d3dStuff.fenceValue[d3dStuff.frameIndex];
 }
 
 /**
 * レンダリングパイプラインの更新.
 */
-bool UpdatePipeline(Direct3DStuff& d3dStuff)
+void Render(Direct3DStuff& d3dStuff)
 {
-	WaitForPreviousFrame();
+	WaitForPreviousFrame(d3dStuff);
 
 	// コマンドリスト及びコマンドアロケータをリセット.
-	bool Running = true;
 	HRESULT hr;
 	hr = d3dStuff.commandAllocator[d3dStuff.frameIndex]->Reset();
 	if (FAILED(hr)) {
-		Running = false;
+		d3dStuff.running = false;
 	}
 	hr = d3dStuff.commandList->Reset(d3dStuff.commandAllocator[d3dStuff.frameIndex].Get(), nullptr);
 	if (FAILED(hr)) {
-		Running = false;
+		d3dStuff.running = false;
 	}
 
 	// コマンドを積んでいく.
@@ -346,18 +380,25 @@ bool UpdatePipeline(Direct3DStuff& d3dStuff)
 
 	hr = d3dStuff.commandList->Close();
 	if (FAILED(hr)) {
-		Running = false;
+		d3dStuff.running = false;
+	}
+
+	// 描画開始.
+	ID3D12CommandList* commandListArray[] = { d3dStuff.commandList.Get() };
+	d3dStuff.commandQueue->ExecuteCommandLists(_countof(commandListArray), commandListArray);
+	hr = d3dStuff.commandQueue->Signal(d3dStuff.fenceList[d3dStuff.frameIndex].Get(), d3dStuff.fenceValue[d3dStuff.frameIndex]);
+	if (FAILED(hr)) {
+		d3dStuff.running = false;
+	}
+	hr = d3dStuff.swapChain->Present(1, 0);
+	if (FAILED(hr)) {
+		d3dStuff.running = false;
 	}
 }
 
-
 /**
 * シーンの更新.
-*
-* @retval true ゲームを続ける.
-* @retval false ゲームを終了する.
 */
-bool Update(Direct3DStuff&)
+void Update(Direct3DStuff&)
 {
-	return true;
 }
