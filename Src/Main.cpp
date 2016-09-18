@@ -199,7 +199,11 @@ bool Init3D(Direct3DStuff& d3dStuff)
 		++adapterIndex;
 	}
 	if (!adapterFound) {
-		return false;
+		// 機能レベル11を満たすハードウェアが見つからない場合、WARPデバイスの作成を試みる.
+		hr = dxgiFactory->EnumWarpAdapter(IID_PPV_ARGS(&dxgiAdapter));
+		if (FAILED(hr)) {
+			return false;
+		}
 	}
 	hr = D3D12CreateDevice(dxgiAdapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(d3dStuff.device.GetAddressOf()));
 	if (FAILED(hr)) {
