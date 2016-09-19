@@ -526,7 +526,7 @@ void Render(Direct3DStuff& d3dStuff)
 	if (FAILED(hr)) {
 		d3dStuff.running = false;
 	}
-	hr = d3dStuff.commandList->Reset(d3dStuff.commandAllocator[d3dStuff.frameIndex].Get(), nullptr);
+	hr = d3dStuff.commandList->Reset(d3dStuff.commandAllocator[d3dStuff.frameIndex].Get(), d3dStuff.pso.Get());
 	if (FAILED(hr)) {
 		d3dStuff.running = false;
 	}
@@ -539,6 +539,14 @@ void Render(Direct3DStuff& d3dStuff)
 	static const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
 	d3dStuff.commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+
+	// ’¸“_‚ð•`‰æ.
+	d3dStuff.commandList->SetGraphicsRootSignature(d3dStuff.rootSignature.Get());
+	d3dStuff.commandList->RSSetViewports(1, &d3dStuff.viewport);
+	d3dStuff.commandList->RSSetScissorRects(1, &d3dStuff.scissorRect);
+	d3dStuff.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	d3dStuff.commandList->IASetVertexBuffers(0, 1, &d3dStuff.vertexBufferView);
+	d3dStuff.commandList->DrawInstanced(3, 1, 0, 0);
 
 	hr = d3dStuff.commandList->Close();
 	if (FAILED(hr)) {
