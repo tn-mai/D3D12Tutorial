@@ -8,10 +8,11 @@ using Microsoft::WRL::ComPtr;
 
 struct Direct3DStuff {
 	static const int frameBufferCount = 3;
-	int witdh;
+	int width;
 	int height;
 	bool fullScreen;
 	bool running;
+	bool warp;
 	bool initialized;
 	HWND hwnd;
 
@@ -28,6 +29,40 @@ struct Direct3DStuff {
 	UINT64 fenceValueForFrameBuffer[frameBufferCount];
 	int frameIndex;
 	int rtvDescriptorSize;
+
+	ComPtr<ID3D12PipelineState> pso;
+	ComPtr<ID3DBlob> signatureBlob;
+	ComPtr<ID3D12RootSignature> rootSignature;
+	D3D12_VIEWPORT viewport;
+	D3D12_RECT scissorRect;
+	ComPtr<ID3D12Resource> vertexBuffer;
+	D3D12_VERTEX_BUFFER_VIEW vertexBufferView;
+
+	ComPtr<ID3DBlob> vertexShaderBlob;
+	ComPtr<ID3DBlob> pixelShaderBlob;
+};
+
+/**
+* Vertex構造体のレイアウト.
+*/
+D3D12_INPUT_ELEMENT_DESC vertexLayout[] = {
+	{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+};
+
+/**
+* 頂点データ型.
+*/
+struct Vertex {
+	DirectX::XMFLOAT3 pos;
+};
+
+/**
+* 頂点データ配列.
+*/
+Vertex vertexList[] = {
+	{ { 0.0f, 0.5f, 0.5f } },
+	{ { 0.5f, -0.5f, 0.5f } },
+	{ { -0.5f, -0.5f, 0.5f } },
 };
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -98,12 +133,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prevInstance, PWSTR cmdLine, i
 	UpdateWindow(hwnd);
 
 	Direct3DStuff d3dStuff;
-	d3dStuff.witdh = width;
+	d3dStuff.width = width;
 	d3dStuff.height = height;
 	d3dStuff.fullScreen = fullScreen;
 	d3dStuff.hwnd = hwnd;
 	d3dStuff.running = true;
 	d3dStuff.initialized = false;
+	d3dStuff.warp = false;
 	d3dStuff.masterFenceValue = 0;
 	d3dStuff.fenceEvent = nullptr;
 	if (!Initialize(d3dStuff)) {
@@ -206,6 +242,7 @@ bool Init3D(Direct3DStuff& d3dStuff)
 		if (FAILED(hr)) {
 			return false;
 		}
+		d3dStuff.warp = true;
 	}
 	hr = D3D12CreateDevice(dxgiAdapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(d3dStuff.device.GetAddressOf()));
 	if (FAILED(hr)) {
@@ -222,7 +259,7 @@ bool Init3D(Direct3DStuff& d3dStuff)
 
 	// スワップチェーンを作成.
 	DXGI_SWAP_CHAIN_DESC1 scDesc = {};
-	scDesc.Width = d3dStuff.witdh;
+	scDesc.Width = d3dStuff.width;
 	scDesc.Height = d3dStuff.height;
 	scDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	scDesc.SampleDesc.Count = 1;
@@ -274,11 +311,11 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	// コマンドアロケータと異なり、コマンドリストはコマンドキューが実行されたあとならいつでもリセットできる.
 	// バックバッファ毎に持つ必要がないため1つだけ作ればよい.
 	// そのかわり、描画したいバックバッファが変わる毎に、対応するコマンドアロケータを設定し直す必要がある.
+	// 生成された直後のコマンドリストはリセットが呼び出された直後と同じ状態になっているため、すぐにコマンドを送り込むことが出来る.
 	hr = d3dStuff.device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, d3dStuff.commandAllocator[0].Get(), nullptr, IID_PPV_ARGS(d3dStuff.commandList.GetAddressOf()));
 	if (FAILED(hr)) {
 		return false;
 	}
-	d3dStuff.commandList->Close();
 
 	// フェンスとフェンスイベントを作成.
 	// DirectX 12では、GPUの描画終了を検出するためにフェンスというものを使う.
@@ -296,6 +333,128 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	for (int i = 0; i < d3dStuff.frameBufferCount; ++i) {
 		d3dStuff.fenceValueForFrameBuffer[i] = 0;
 	}
+
+	// ルートシグネチャを作成.
+	D3D12_ROOT_SIGNATURE_DESC rsDesc = { 0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT };
+	hr = D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &d3dStuff.signatureBlob, nullptr);
+	if (FAILED(hr)) {
+		return false;
+	}
+	hr = d3dStuff.device->CreateRootSignature(0, d3dStuff.signatureBlob->GetBufferPointer(), d3dStuff.signatureBlob->GetBufferSize(), IID_PPV_ARGS(d3dStuff.rootSignature.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+
+	// 頂点シェーダを作成.
+	ComPtr<ID3DBlob> errorBuffer;
+	hr = D3DCompileFromFile(L"Res/VertexShader.hlsl", nullptr, nullptr, "main", "vs_5_0", D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION, 0, d3dStuff.vertexShaderBlob.GetAddressOf(), errorBuffer.GetAddressOf());
+	if (FAILED(hr)) {
+		if (errorBuffer) {
+			OutputDebugStringA(static_cast<char*>(errorBuffer->GetBufferPointer()));
+		}
+		return false;
+	}
+
+	// ピクセルシェーダを作成.
+	hr = D3DCompileFromFile(L"Res/PixelShader.hlsl", nullptr, nullptr, "main", "ps_5_0", D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION, 0, d3dStuff.pixelShaderBlob.GetAddressOf(), errorBuffer.GetAddressOf());
+	if (FAILED(hr)) {
+		if (errorBuffer) {
+			OutputDebugStringA(static_cast<char*>(errorBuffer->GetBufferPointer()));
+		}
+		return false;
+	}
+
+	// パイプラインステートオブジェクト(PSO)を作成.
+	// PSOは、レンダリングパイプラインの状態を素早く、一括して変更できるように導入された.
+	// PSOによって、多くのステートに対してそれぞれ状態変更コマンドを送らずとも、単にPSOを切り替えるコマンドを送るだけで済む.
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+	psoDesc.pRootSignature = d3dStuff.rootSignature.Get();
+	psoDesc.VS.pShaderBytecode = d3dStuff.vertexShaderBlob->GetBufferPointer();
+	psoDesc.VS.BytecodeLength = d3dStuff.vertexShaderBlob->GetBufferSize();
+	psoDesc.PS.pShaderBytecode = d3dStuff.pixelShaderBlob->GetBufferPointer();
+	psoDesc.PS.BytecodeLength = d3dStuff.pixelShaderBlob->GetBufferSize();
+	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	psoDesc.SampleMask = 0xffffffff;
+	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	psoDesc.InputLayout.pInputElementDescs = vertexLayout;
+	psoDesc.InputLayout.NumElements = sizeof(vertexLayout) / sizeof(D3D12_INPUT_ELEMENT_DESC);
+	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	psoDesc.NumRenderTargets = 1;
+	psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	psoDesc.SampleDesc.Count = 1;
+	if (d3dStuff.warp) {
+		psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_TOOL_DEBUG;
+	}
+	hr = d3dStuff.device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(d3dStuff.pso.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+
+	// 頂点バッファを作成.
+	hr = d3dStuff.device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(sizeof(vertexList)),
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		nullptr,
+		IID_PPV_ARGS(d3dStuff.vertexBuffer.GetAddressOf())
+	);
+	if (FAILED(hr)) {
+		return false;
+	}
+	d3dStuff.vertexBuffer->SetName(L"Vertex Buffer");
+
+	// 頂点バッファに頂点データ配列を転送.
+	ComPtr<ID3D12Resource> vbUploadHeap;
+	hr = d3dStuff.device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(sizeof(vertexList)),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(vbUploadHeap.GetAddressOf())
+	);
+	if (FAILED(hr)) {
+		return false;
+	}
+	vbUploadHeap->SetName(L"Vertex Buffer Uplaod Heap");
+	D3D12_SUBRESOURCE_DATA vertexData = {};
+	vertexData.pData = vertexList;
+	vertexData.RowPitch = sizeof(vertexList);
+	vertexData.SlicePitch = sizeof(vertexList);
+	if (UpdateSubresources<1>(d3dStuff.commandList.Get(), d3dStuff.vertexBuffer.Get(), vbUploadHeap.Get(), 0, 0, 1, &vertexData) == 0) {
+		return false;
+	}
+	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.vertexBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER));
+	d3dStuff.vertexBufferView.BufferLocation = d3dStuff.vertexBuffer->GetGPUVirtualAddress();
+	d3dStuff.vertexBufferView.StrideInBytes = sizeof(Vertex);
+	d3dStuff.vertexBufferView.SizeInBytes = sizeof(vertexList);
+
+	hr = d3dStuff.commandList->Close();
+	if (FAILED(hr)) {
+		return false;
+	}
+	ID3D12CommandList* commandListArray[] = { d3dStuff.commandList.Get() };
+	d3dStuff.commandQueue->ExecuteCommandLists(_countof(commandListArray), commandListArray);
+	hr = d3dStuff.commandQueue->Signal(d3dStuff.fence.Get(), d3dStuff.masterFenceValue);
+	if (FAILED(hr)) {
+		return false;
+	}
+	d3dStuff.fence->SetEventOnCompletion(d3dStuff.masterFenceValue, d3dStuff.fenceEvent);
+	WaitForSingleObject(d3dStuff.fenceEvent, INFINITE);
+	++d3dStuff.masterFenceValue;
+
+	d3dStuff.viewport.TopLeftX = 0;
+	d3dStuff.viewport.TopLeftY = 0;
+	d3dStuff.viewport.Width = static_cast<float>(d3dStuff.width);
+	d3dStuff.viewport.Height = static_cast<float>(d3dStuff.height);
+	d3dStuff.viewport.MinDepth = 0.0f;
+	d3dStuff.viewport.MaxDepth = 1.0f;
+
+	d3dStuff.scissorRect.left = 0;
+	d3dStuff.scissorRect.top = 0;
+	d3dStuff.scissorRect.right = d3dStuff.width;
+	d3dStuff.scissorRect.bottom = d3dStuff.height;
 
 	d3dStuff.initialized = true;
 

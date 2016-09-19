@@ -23,4 +23,12 @@
       <Filter>Src</Filter>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Res\VertexShader.hlsl">
+      <Filter>Res</Filter>
+    </FxCompile>
+    <FxCompile Include="Res\PixelShader.hlsl">
+      <Filter>Res</Filter>
+    </FxCompile>
+  </ItemGroup>
 </Project>
