@@ -3,9 +3,18 @@
 */
 
 /**
+* ピクセルシェーダへ入力するフォーマットの定義.
+* 対になる頂点シェーダでも同じ定義を使用すること.
+*/
+struct PSInput {
+	float4 pos : SV_POSITION;
+	float4 col : COLOR;
+};
+
+/**
 * 緑色を返すだけのピクセルシェーダ.
 */
-float4 main() : SV_TARGET
+float4 main(PSInput input) : SV_TARGET
 {
-	return float4(0.0f, 1.0f, 0.0f, 1.0f);
+	return input.col;
 }
