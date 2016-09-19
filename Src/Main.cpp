@@ -35,8 +35,11 @@ struct Direct3DStuff {
 	ComPtr<ID3D12RootSignature> rootSignature;
 	D3D12_VIEWPORT viewport;
 	D3D12_RECT scissorRect;
+
 	ComPtr<ID3D12Resource> vertexBuffer;
 	D3D12_VERTEX_BUFFER_VIEW vertexBufferView;
+	ComPtr<ID3D12Resource> indexBuffer;
+	D3D12_INDEX_BUFFER_VIEW indexBufferView;
 
 	ComPtr<ID3DBlob> vertexShaderBlob;
 	ComPtr<ID3DBlob> pixelShaderBlob;
@@ -62,9 +65,18 @@ struct Vertex {
 * 頂点データ配列.
 */
 Vertex vertexList[] = {
-	{ DirectX::XMFLOAT3(0.0f, 0.5f, 0.5f), DirectX::XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
+	{ DirectX::XMFLOAT3(-0.5f, 0.5f, 0.5f), DirectX::XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
 	{ DirectX::XMFLOAT3(0.5f, -0.5f, 0.5f), DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
 	{ DirectX::XMFLOAT3(-0.5f, -0.5f, 0.5f), DirectX::XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
+	{ DirectX::XMFLOAT3(0.5f, 0.5f, 0.5f), DirectX::XMFLOAT4(1.0f, 0.0f, 1.0f, 1.0f) },
+};
+
+/**
+* インデックスデータ配列.
+*/
+UINT indexList[] = {
+	0, 1, 2,
+	0, 3, 1,
 };
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -432,6 +444,46 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	d3dStuff.vertexBufferView.StrideInBytes = sizeof(Vertex);
 	d3dStuff.vertexBufferView.SizeInBytes = sizeof(vertexList);
 
+	// インデックスバッファを作成.
+	hr = d3dStuff.device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(sizeof(indexList)),
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		nullptr,
+		IID_PPV_ARGS(d3dStuff.indexBuffer.GetAddressOf())
+	);
+	if (FAILED(hr)) {
+		return false;
+	}
+	d3dStuff.indexBuffer->SetName(L"Index Buffer");
+
+	// インデックスバッファにインデックスデータ配列を転送.
+	ComPtr<ID3D12Resource> ibUploadHeap;
+	hr = d3dStuff.device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(sizeof(indexList)),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(ibUploadHeap.GetAddressOf())
+	);
+	if (FAILED(hr)) {
+		return false;
+	}
+	ibUploadHeap->SetName(L"Index Buffer Upload Heap");
+	D3D12_SUBRESOURCE_DATA indexData = {};
+	indexData.pData = indexList;
+	indexData.RowPitch = sizeof(indexList);
+	indexData.SlicePitch = sizeof(indexList);
+	if (UpdateSubresources<1>(d3dStuff.commandList.Get(), d3dStuff.indexBuffer.Get(), ibUploadHeap.Get(), 0, 0, 1, &indexData) == 0) {
+		return false;
+	}
+	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.indexBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER));
+	d3dStuff.indexBufferView.BufferLocation = d3dStuff.indexBuffer->GetGPUVirtualAddress();
+	d3dStuff.indexBufferView.SizeInBytes = sizeof(indexList);
+	d3dStuff.indexBufferView.Format = DXGI_FORMAT_R32_UINT;
+
 	hr = d3dStuff.commandList->Close();
 	if (FAILED(hr)) {
 		return false;
@@ -548,7 +600,8 @@ void Render(Direct3DStuff& d3dStuff)
 	d3dStuff.commandList->RSSetScissorRects(1, &d3dStuff.scissorRect);
 	d3dStuff.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	d3dStuff.commandList->IASetVertexBuffers(0, 1, &d3dStuff.vertexBufferView);
-	d3dStuff.commandList->DrawInstanced(3, 1, 0, 0);
+	d3dStuff.commandList->IASetIndexBuffer(&d3dStuff.indexBufferView);
+	d3dStuff.commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
 
 	hr = d3dStuff.commandList->Close();
 	if (FAILED(hr)) {
