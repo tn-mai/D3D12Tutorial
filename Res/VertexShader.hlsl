@@ -21,12 +21,20 @@ struct PSInput {
 };
 
 /**
+* 定数バッファ.
+*/
+cbuffer ConstantBuffer : register(b0)
+{
+	float4 color;
+}
+
+/**
 * 入力された座標をそのまま出力する頂点シェーダ.
 */
 PSInput main(VSInput input)
 {
 	PSInput result;
 	result.pos = float4(input.pos, 1.0f);
-	result.col = input.col;
+	result.col = input.col * color;
 	return result;
 }

@@ -371,7 +371,7 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
 	cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	cbvHeapDesc.NumDescriptors = d3dStuff.frameBufferCount;
-	cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	hr = d3dStuff.device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(d3dStuff.cbvDescriptorHeap.GetAddressOf()));
 	if (FAILED(hr)) {
 		return false;
@@ -402,6 +402,9 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	std::fill(d3dStuff.cbColorMultiplier.padding, d3dStuff.cbColorMultiplier.padding + _countof(d3dStuff.cbColorMultiplier.padding), 0);
 	D3D12_RANGE  cbvRange = { 0, 0 };
 	hr = d3dStuff.cbvUploadHeap->Map(0, &cbvRange, &d3dStuff.cbvHeapBegin);
+	if (FAILED(hr)) {
+		return false;
+	}
 	memcpy(d3dStuff.cbvHeapBegin, &d3dStuff.cbColorMultiplier, sizeof(d3dStuff.cbColorMultiplier));
 
 	// コマンドアロケータを作成.
@@ -452,7 +455,7 @@ bool Init3D(Direct3DStuff& d3dStuff)
 		descRangeList[0].RegisterSpace = 0;
 		descRangeList[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 		D3D12_ROOT_PARAMETER rootParameterList[1];
-		rootParameterList[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+		rootParameterList[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 		rootParameterList[0].DescriptorTable.NumDescriptorRanges = _countof(descRangeList);
 		rootParameterList[0].DescriptorTable.pDescriptorRanges = descRangeList;
 		rootParameterList[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
@@ -715,6 +718,13 @@ void Render(Direct3DStuff& d3dStuff)
 	d3dStuff.commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 
+	// 定数バッファを指定.
+	ID3D12DescriptorHeap* cbvHeapList[] = { d3dStuff.cbvDescriptorHeap.Get() };
+	d3dStuff.commandList->SetDescriptorHeaps(_countof(cbvHeapList), cbvHeapList);
+	D3D12_GPU_DESCRIPTOR_HANDLE cbvHandle = d3dStuff.cbvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
+	cbvHandle.ptr += d3dStuff.frameIndex * d3dStuff.cbvDescriptorHeapSize;
+	d3dStuff.commandList->SetGraphicsRootDescriptorTable(0, cbvHandle);
+
 	// 頂点を描画.
 	d3dStuff.commandList->SetGraphicsRootSignature(d3dStuff.rootSignature.Get());
 	d3dStuff.commandList->RSSetViewports(1, &d3dStuff.viewport);
@@ -749,6 +759,37 @@ void Render(Direct3DStuff& d3dStuff)
 /**
 * シーンの更新.
 */
-void Update(Direct3DStuff&)
+void Update(Direct3DStuff& d3dStuff)
 {
+	static DirectX::XMFLOAT4 colorIncrimentValue(0.00002f, 0.00006f, 0.00009f, 0.0f);
+
+	d3dStuff.cbColorMultiplier.color.x += colorIncrimentValue.x;
+	if (d3dStuff.cbColorMultiplier.color.x >= 1.0f) {
+		d3dStuff.cbColorMultiplier.color.x = 1.0f;
+		colorIncrimentValue.x *= -1.0f;
+	} else if (d3dStuff.cbColorMultiplier.color.x < 0.0f) {
+		d3dStuff.cbColorMultiplier.color.x = 0.0f;
+		colorIncrimentValue.x *= -1.0f;
+	}
+	d3dStuff.cbColorMultiplier.color.y += colorIncrimentValue.y;
+	if (d3dStuff.cbColorMultiplier.color.y >= 1.0f) {
+		d3dStuff.cbColorMultiplier.color.y = 1.0f;
+		colorIncrimentValue.y *= -1.0f;
+	} else if (d3dStuff.cbColorMultiplier.color.y < 0.0f) {
+		d3dStuff.cbColorMultiplier.color.y = 0.0f;
+		colorIncrimentValue.y *= -1.0f;
+	}
+	d3dStuff.cbColorMultiplier.color.z += colorIncrimentValue.z;
+	if (d3dStuff.cbColorMultiplier.color.z >= 1.0f) {
+		d3dStuff.cbColorMultiplier.color.z = 1.0f;
+		colorIncrimentValue.z *= -1.0f;
+	} else if (d3dStuff.cbColorMultiplier.color.z < 0.0f) {
+		d3dStuff.cbColorMultiplier.color.z = 0.0f;
+		colorIncrimentValue.z *= -1.0f;
+	}
+	memcpy(
+		static_cast<uint8_t*>(d3dStuff.cbvHeapBegin) + d3dStuff.frameIndex * sizeof(d3dStuff.cbColorMultiplier),
+		&d3dStuff.cbColorMultiplier,
+		sizeof(d3dStuff.cbColorMultiplier)
+	);
 }
