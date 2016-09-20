@@ -3,9 +3,24 @@
 */
 #include "stdafx.h"
 #include <wrl/client.h>
+#include <algorithm>
 
 using Microsoft::WRL::ComPtr;
 
+/**
+* 定数バッファ型.
+*
+* DirectX 12では、定数バッファのサイズを256バイト単位にすることが要求されている.
+*/
+struct ConstantBuffer {
+	DirectX::XMFLOAT4 color;
+	uint8_t padding[256 - sizeof(DirectX::XMFLOAT4)]; // 256バイト単位にするための詰め物.
+};
+static_assert((sizeof(ConstantBuffer) % 256) == 0, "CB size error");
+
+/**
+* Direct3Dで必要なオブジェクトをまとめたもの.
+*/
 struct Direct3DStuff {
 	static const int frameBufferCount = 3;
 	int width;
@@ -23,6 +38,10 @@ struct Direct3DStuff {
 	ComPtr<ID3D12Resource> renderTargetList[frameBufferCount];
 	ComPtr<ID3D12DescriptorHeap> dsvDescriptorHeap;
 	ComPtr<ID3D12Resource> depthStencilbuffer;
+	ComPtr<ID3D12DescriptorHeap> cbvDescriptorHeap;
+	ComPtr<ID3D12Resource> cbvUploadHeap;
+	UINT cbvDescriptorHeapSize;
+	void* cbvHeapBegin;
 	ComPtr<ID3D12CommandAllocator> commandAllocator[frameBufferCount];
 	ComPtr<ID3D12GraphicsCommandList> commandList;
 	ComPtr<ID3D12Fence> fence;
@@ -45,6 +64,8 @@ struct Direct3DStuff {
 
 	ComPtr<ID3DBlob> vertexShaderBlob;
 	ComPtr<ID3DBlob> pixelShaderBlob;
+
+	ConstantBuffer cbColorMultiplier;
 };
 
 /**
@@ -346,6 +367,43 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	}
 	d3dStuff.device->CreateDepthStencilView(d3dStuff.depthStencilbuffer.Get(), &depthStencilDesc, d3dStuff.dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
+	// 定数バッファを作成.
+	D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
+	cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	cbvHeapDesc.NumDescriptors = d3dStuff.frameBufferCount;
+	cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	hr = d3dStuff.device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(d3dStuff.cbvDescriptorHeap.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+	d3dStuff.cbvDescriptorHeapSize = d3dStuff.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	hr = d3dStuff.device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(sizeof(ConstantBuffer) * d3dStuff.frameBufferCount),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(d3dStuff.cbvUploadHeap.GetAddressOf())
+	);
+	if (FAILED(hr)) {
+		return false;
+	}
+	d3dStuff.cbvUploadHeap->SetName(L"CBV Upload Heap");
+	D3D12_CPU_DESCRIPTOR_HANDLE cbvCpuHandle = d3dStuff.cbvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
+	cbvDesc.BufferLocation = d3dStuff.cbvUploadHeap->GetGPUVirtualAddress();
+	cbvDesc.SizeInBytes = sizeof(ConstantBuffer);
+	for (int i = 0; i < d3dStuff.frameBufferCount; ++i) {
+		d3dStuff.device->CreateConstantBufferView(&cbvDesc, cbvCpuHandle);
+		cbvDesc.BufferLocation += sizeof(ConstantBuffer);
+		cbvCpuHandle.ptr += d3dStuff.cbvDescriptorHeapSize;
+	}
+	d3dStuff.cbColorMultiplier.color = DirectX::XMFLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
+	std::fill(d3dStuff.cbColorMultiplier.padding, d3dStuff.cbColorMultiplier.padding + _countof(d3dStuff.cbColorMultiplier.padding), 0);
+	D3D12_RANGE  cbvRange = { 0, 0 };
+	hr = d3dStuff.cbvUploadHeap->Map(0, &cbvRange, &d3dStuff.cbvHeapBegin);
+	memcpy(d3dStuff.cbvHeapBegin, &d3dStuff.cbColorMultiplier, sizeof(d3dStuff.cbColorMultiplier));
+
 	// コマンドアロケータを作成.
 	// コマンドアロケータは描画中にGPUが実行する各コマンドを保持する.
 	// GPUが描画中のコマンドを破棄した場合、GPUの動作は未定義になってしまう. そのため、描画中はコマンドを保持し続ける必要がある.
@@ -386,14 +444,37 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	}
 
 	// ルートシグネチャを作成.
-	D3D12_ROOT_SIGNATURE_DESC rsDesc = { 0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT };
-	hr = D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &d3dStuff.signatureBlob, nullptr);
-	if (FAILED(hr)) {
-		return false;
-	}
-	hr = d3dStuff.device->CreateRootSignature(0, d3dStuff.signatureBlob->GetBufferPointer(), d3dStuff.signatureBlob->GetBufferSize(), IID_PPV_ARGS(d3dStuff.rootSignature.GetAddressOf()));
-	if (FAILED(hr)) {
-		return false;
+	{
+		D3D12_DESCRIPTOR_RANGE descRangeList[1];
+		descRangeList[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+		descRangeList[0].NumDescriptors = 1;
+		descRangeList[0].BaseShaderRegister = 0;
+		descRangeList[0].RegisterSpace = 0;
+		descRangeList[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+		D3D12_ROOT_PARAMETER rootParameterList[1];
+		rootParameterList[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+		rootParameterList[0].DescriptorTable.NumDescriptorRanges = _countof(descRangeList);
+		rootParameterList[0].DescriptorTable.pDescriptorRanges = descRangeList;
+		rootParameterList[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+		D3D12_ROOT_SIGNATURE_DESC rsDesc = {
+			_countof(rootParameterList),
+			rootParameterList,
+			0,
+			nullptr,
+			D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+			D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+			D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+			D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS |
+			D3D12_ROOT_SIGNATURE_FLAG_DENY_PIXEL_SHADER_ROOT_ACCESS
+		};
+		hr = D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &d3dStuff.signatureBlob, nullptr);
+		if (FAILED(hr)) {
+			return false;
+		}
+		hr = d3dStuff.device->CreateRootSignature(0, d3dStuff.signatureBlob->GetBufferPointer(), d3dStuff.signatureBlob->GetBufferSize(), IID_PPV_ARGS(d3dStuff.rootSignature.GetAddressOf()));
+		if (FAILED(hr)) {
+			return false;
+		}
 	}
 
 	// 頂点シェーダを作成.
