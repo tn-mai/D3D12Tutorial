@@ -21,6 +21,8 @@ struct Direct3DStuff {
 	ComPtr<ID3D12CommandQueue> commandQueue;
 	ComPtr<ID3D12DescriptorHeap> rtvDescriptorHeap;
 	ComPtr<ID3D12Resource> renderTargetList[frameBufferCount];
+	ComPtr<ID3D12DescriptorHeap> dsvDescriptorHeap;
+	ComPtr<ID3D12Resource> depthStencilbuffer;
 	ComPtr<ID3D12CommandAllocator> commandAllocator[frameBufferCount];
 	ComPtr<ID3D12GraphicsCommandList> commandList;
 	ComPtr<ID3D12Fence> fence;
@@ -69,6 +71,11 @@ Vertex vertexList[] = {
 	{ DirectX::XMFLOAT3(0.5f, -0.5f, 0.5f), DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
 	{ DirectX::XMFLOAT3(-0.5f, -0.5f, 0.5f), DirectX::XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
 	{ DirectX::XMFLOAT3(0.5f, 0.5f, 0.5f), DirectX::XMFLOAT4(1.0f, 0.0f, 1.0f, 1.0f) },
+
+	{ DirectX::XMFLOAT3(-0.75f, 0.75f, 0.7f), DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
+	{ DirectX::XMFLOAT3(0.0f, 0.0f, 0.7f), DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
+	{ DirectX::XMFLOAT3(-0.75f, 0.0f, 0.7f), DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
+	{ DirectX::XMFLOAT3(0.0f, 0.75f, 0.7f), DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
 };
 
 /**
@@ -309,6 +316,36 @@ bool Init3D(Direct3DStuff& d3dStuff)
 		rtvHandle.ptr += d3dStuff.rtvDescriptorSize;
 	}
 
+	// DS用のデスクリプタヒープ及びデスクリプタを作成.
+	D3D12_DESCRIPTOR_HEAP_DESC dsvDesc = {};
+	dsvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+	dsvDesc.NumDescriptors = 1;
+	dsvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	hr = d3dStuff.device->CreateDescriptorHeap(&dsvDesc, IID_PPV_ARGS(d3dStuff.dsvDescriptorHeap.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+	D3D12_DEPTH_STENCIL_VIEW_DESC depthStencilDesc = {};
+	depthStencilDesc.Format = DXGI_FORMAT_D32_FLOAT;
+	depthStencilDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+	depthStencilDesc.Flags = D3D12_DSV_FLAG_NONE;
+	D3D12_CLEAR_VALUE dsClearValue = {};
+	dsClearValue.Format = DXGI_FORMAT_D32_FLOAT;
+	dsClearValue.DepthStencil.Depth = 1.0f;
+	dsClearValue.DepthStencil.Stencil = 0;
+	hr = d3dStuff.device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, d3dStuff.width, d3dStuff.height, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL),
+		D3D12_RESOURCE_STATE_DEPTH_WRITE,
+		&dsClearValue,
+		IID_PPV_ARGS(d3dStuff.depthStencilbuffer.GetAddressOf())
+	);
+	if (FAILED(hr)) {
+		return false;
+	}
+	d3dStuff.device->CreateDepthStencilView(d3dStuff.depthStencilbuffer.Get(), &depthStencilDesc, d3dStuff.dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
 	// コマンドアロケータを作成.
 	// コマンドアロケータは描画中にGPUが実行する各コマンドを保持する.
 	// GPUが描画中のコマンドを破棄した場合、GPUの動作は未定義になってしまう. そのため、描画中はコマンドを保持し続ける必要がある.
@@ -390,6 +427,7 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 	psoDesc.SampleMask = 0xffffffff;
 	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 	psoDesc.InputLayout.pInputElementDescs = vertexLayout;
 	psoDesc.InputLayout.NumElements = sizeof(vertexLayout) / sizeof(D3D12_INPUT_ELEMENT_DESC);
 	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
@@ -589,9 +627,11 @@ void Render(Direct3DStuff& d3dStuff)
 	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
 	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = d3dStuff.rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 	rtvHandle.ptr += d3dStuff.frameIndex * d3dStuff.rtvDescriptorSize;
-	d3dStuff.commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = d3dStuff.dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	d3dStuff.commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 	static const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
 	d3dStuff.commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+	d3dStuff.commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 
 	// 頂点を描画.
@@ -602,6 +642,7 @@ void Render(Direct3DStuff& d3dStuff)
 	d3dStuff.commandList->IASetVertexBuffers(0, 1, &d3dStuff.vertexBufferView);
 	d3dStuff.commandList->IASetIndexBuffer(&d3dStuff.indexBufferView);
 	d3dStuff.commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
+	d3dStuff.commandList->DrawIndexedInstanced(6, 1, 0, 4, 0);
 
 	hr = d3dStuff.commandList->Close();
 	if (FAILED(hr)) {
