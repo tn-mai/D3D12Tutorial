@@ -859,47 +859,47 @@ void Render(Direct3DStuff& d3dStuff)
 */
 void Update(Direct3DStuff& d3dStuff)
 {
-#if 0
-	static DirectX::XMFLOAT4 colorIncrimentValue(0.00002f, 0.00006f, 0.00009f, 0.0f);
+	DirectX::XMMATRIX viewMat = DirectX::XMLoadFloat4x4(&d3dStuff.matView);
+	DirectX::XMMATRIX projMat = DirectX::XMLoadFloat4x4(&d3dStuff.matProjection);
 
-	d3dStuff.cbPerObject.color.x += colorIncrimentValue.x;
-	if (d3dStuff.cbPerObject.color.x >= 1.0f) {
-		d3dStuff.cbPerObject.color.x = 1.0f;
-		colorIncrimentValue.x *= -1.0f;
-	} else if (d3dStuff.cbPerObject.color.x < 0.0f) {
-		d3dStuff.cbPerObject.color.x = 0.0f;
-		colorIncrimentValue.x *= -1.0f;
+	{
+		DirectX::XMMATRIX rotX = DirectX::XMMatrixRotationX(0.001f);
+		DirectX::XMMATRIX rotY = DirectX::XMMatrixRotationY(0.002f);
+		DirectX::XMMATRIX rotZ = DirectX::XMMatrixRotationZ(0.003f);
+		DirectX::XMMATRIX rot = DirectX::XMLoadFloat4x4(&d3dStuff.objectState[0].matRot) * rotX * rotY * rotZ;
+		DirectX::XMMATRIX trans = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat4(&d3dStuff.objectState[0].pos));
+		DirectX::XMMATRIX world = rot * trans;
+		DirectX::XMStoreFloat4x4(&d3dStuff.objectState[0].matRot, rot);
+		DirectX::XMStoreFloat4x4(&d3dStuff.objectState[0].matWorld, world);
+
+		DirectX::XMMATRIX wvpMat = DirectX::XMLoadFloat4x4(&d3dStuff.objectState[0].matWorld) * viewMat * projMat;
+		DirectX::XMMATRIX transposed = XMMatrixTranspose(wvpMat);
+		DirectX::XMStoreFloat4x4(&d3dStuff.cbPerObject.wvpMatrix, transposed);
+		memcpy(
+			static_cast<uint8_t*>(d3dStuff.cbvHeapBegin[d3dStuff.frameIndex]),
+			&d3dStuff.cbPerObject,
+			sizeof(d3dStuff.cbPerObject)
+		);
 	}
-	d3dStuff.cbPerObject.color.y += colorIncrimentValue.y;
-	if (d3dStuff.cbPerObject.color.y >= 1.0f) {
-		d3dStuff.cbPerObject.color.y = 1.0f;
-		colorIncrimentValue.y *= -1.0f;
-	} else if (d3dStuff.cbPerObject.color.y < 0.0f) {
-		d3dStuff.cbPerObject.color.y = 0.0f;
-		colorIncrimentValue.y *= -1.0f;
+	{
+		DirectX::XMMATRIX rotX = DirectX::XMMatrixRotationX(0.003f);
+		DirectX::XMMATRIX rotY = DirectX::XMMatrixRotationY(0.002f);
+		DirectX::XMMATRIX rotZ = DirectX::XMMatrixRotationZ(0.001f);
+		DirectX::XMMATRIX rot = rotZ * DirectX::XMLoadFloat4x4(&d3dStuff.objectState[1].matRot) * (rotX * rotY);
+		DirectX::XMMATRIX trans = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat4(&d3dStuff.objectState[1].pos));
+		DirectX::XMMATRIX transParent = DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat4(&d3dStuff.objectState[0].pos));
+		DirectX::XMMATRIX scale = DirectX::XMMatrixScaling(0.5f, 0.5f, 0.5f);
+		DirectX::XMMATRIX world = scale * trans * rot * transParent;
+		DirectX::XMStoreFloat4x4(&d3dStuff.objectState[1].matRot, rot);
+		DirectX::XMStoreFloat4x4(&d3dStuff.objectState[1].matWorld, world);
+
+		DirectX::XMMATRIX wvpMat = DirectX::XMLoadFloat4x4(&d3dStuff.objectState[1].matWorld) * viewMat * projMat;
+		DirectX::XMMATRIX transposed = XMMatrixTranspose(wvpMat);
+		DirectX::XMStoreFloat4x4(&d3dStuff.cbPerObject.wvpMatrix, transposed);
+		memcpy(
+			static_cast<uint8_t*>(d3dStuff.cbvHeapBegin[d3dStuff.frameIndex]) + AlignedConstantBufferSize,
+			&d3dStuff.cbPerObject,
+			sizeof(d3dStuff.cbPerObject)
+		);
 	}
-	d3dStuff.cbPerObject.color.z += colorIncrimentValue.z;
-	if (d3dStuff.cbPerObject.color.z >= 1.0f) {
-		d3dStuff.cbPerObject.color.z = 1.0f;
-		colorIncrimentValue.z *= -1.0f;
-	} else if (d3dStuff.cbPerObject.color.z < 0.0f) {
-		d3dStuff.cbPerObject.color.z = 0.0f;
-		colorIncrimentValue.z *= -1.0f;
-	}
-	memcpy(
-		static_cast<uint8_t*>(d3dStuff.cbvHeapBegin[d3dStuff.frameIndex]),
-		&d3dStuff.cbPerObject,
-		sizeof(d3dStuff.cbPerObject)
-	);
-#endif
-	memcpy(
-		static_cast<uint8_t*>(d3dStuff.cbvHeapBegin[d3dStuff.frameIndex]),
-		&d3dStuff.cbPerObject,
-		sizeof(d3dStuff.cbPerObject)
-	);
-	memcpy(
-		static_cast<uint8_t*>(d3dStuff.cbvHeapBegin[d3dStuff.frameIndex]) + AlignedConstantBufferSize,
-		&d3dStuff.cbPerObject,
-		sizeof(d3dStuff.cbPerObject)
-	);
 }
