@@ -25,7 +25,7 @@ struct PSInput {
 */
 cbuffer ConstantBuffer : register(b0)
 {
-	float4 color;
+	float4x4 matWVP;
 }
 
 /**
@@ -34,7 +34,8 @@ cbuffer ConstantBuffer : register(b0)
 PSInput main(VSInput input)
 {
 	PSInput result;
-	result.pos = float4(input.pos, 1.0f);
-	result.col = input.col * color;
+	result.pos = mul(float4(input.pos, 1.0f), matWVP);
+	//result.pos = float4(input.pos, 1.0f);
+	result.col = input.col;
 	return result;
 }

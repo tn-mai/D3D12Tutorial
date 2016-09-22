@@ -8,21 +8,107 @@
 using Microsoft::WRL::ComPtr;
 
 /**
+* Vertex構造体のレイアウト.
+*/
+D3D12_INPUT_ELEMENT_DESC vertexLayout[] = {
+	{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+	{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+};
+
+/**
+* 頂点データ型.
+*/
+struct Vertex {
+	constexpr Vertex(float x, float y, float z, float r, float g, float b, float a) : pos(x, y, z), col(r, g, b, a) {}
+	DirectX::XMFLOAT3 pos;
+	DirectX::XMFLOAT4 col;
+};
+
+/**
+* 頂点データ配列.
+*/
+Vertex vertexList[] = {
+	// front face
+	{ -0.5f,  0.5f, -0.5f, 1.0f, 0.0f, 0.0f, 1.0f },
+	{ 0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 1.0f, 1.0f },
+	{ -0.5f, -0.5f, -0.5f, 0.0f, 0.0f, 1.0f, 1.0f },
+	{ 0.5f,  0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
+
+	// right side face
+	{ 0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 0.0f, 1.0f },
+	{ 0.5f,  0.5f,  0.5f, 1.0f, 0.0f, 1.0f, 1.0f },
+	{ 0.5f, -0.5f,  0.5f, 0.0f, 0.0f, 1.0f, 1.0f },
+	{ 0.5f,  0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
+
+	// left side face
+	{ -0.5f,  0.5f,  0.5f, 1.0f, 0.0f, 0.0f, 1.0f },
+	{ -0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 1.0f, 1.0f },
+	{ -0.5f, -0.5f,  0.5f, 0.0f, 0.0f, 1.0f, 1.0f },
+	{ -0.5f,  0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
+
+	// back face
+	{ 0.5f,  0.5f,  0.5f, 1.0f, 0.0f, 0.0f, 1.0f },
+	{ -0.5f, -0.5f,  0.5f, 1.0f, 0.0f, 1.0f, 1.0f },
+	{ 0.5f, -0.5f,  0.5f, 0.0f, 0.0f, 1.0f, 1.0f },
+	{ -0.5f,  0.5f,  0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
+
+	// top face
+	{ -0.5f,  0.5f, -0.5f, 1.0f, 0.0f, 0.0f, 1.0f },
+	{ 0.5f,  0.5f,  0.5f, 1.0f, 0.0f, 1.0f, 1.0f },
+	{ 0.5f,  0.5f, -0.5f, 0.0f, 0.0f, 1.0f, 1.0f },
+	{ -0.5f,  0.5f,  0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
+
+	// bottom face
+	{ 0.5f, -0.5f,  0.5f, 1.0f, 0.0f, 0.0f, 1.0f },
+	{ -0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 1.0f, 1.0f },
+	{ 0.5f, -0.5f, -0.5f, 0.0f, 0.0f, 1.0f, 1.0f },
+	{ -0.5f, -0.5f,  0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
+};
+
+/**
+* インデックスデータ配列.
+*/
+UINT indexList[] = {
+	0, 1, 2,
+	0, 3, 1,
+	4, 5, 6,
+	4, 7, 5,
+	8, 9, 10,
+	8, 11, 9,
+	12, 13, 14,
+	12, 15, 13,
+	16, 17, 18,
+	16, 19, 17,
+	20, 21, 22,
+	20, 23, 21,
+};
+
+/**
 * 定数バッファ型.
 *
 * DirectX 12では、定数バッファのサイズを256バイト単位にすることが要求されている.
 */
 struct ConstantBuffer {
-	DirectX::XMFLOAT4 color;
-	uint8_t padding[256 - sizeof(DirectX::XMFLOAT4)]; // 256バイト単位にするための詰め物.
+	DirectX::XMFLOAT4X4 wvpMatrix;
 };
-static_assert((sizeof(ConstantBuffer) % 256) == 0, "CB size error");
+const size_t AlignedConstantBufferSize = (sizeof(ConstantBuffer) + 255) & ~255UL;
+
+/**
+* オブジェクト用データ.
+*/
+struct ObjectState {
+	DirectX::XMFLOAT4X4 matWorld;
+	DirectX::XMFLOAT4X4 matRot;
+	DirectX::XMFLOAT4 pos;
+};
 
 /**
 * Direct3Dで必要なオブジェクトをまとめたもの.
 */
 struct Direct3DStuff {
 	static const int frameBufferCount = 3;
+	static const int objectCount = 2;
+
 	int width;
 	int height;
 	bool fullScreen;
@@ -39,9 +125,9 @@ struct Direct3DStuff {
 	ComPtr<ID3D12DescriptorHeap> dsvDescriptorHeap;
 	ComPtr<ID3D12Resource> depthStencilbuffer;
 	ComPtr<ID3D12DescriptorHeap> cbvDescriptorHeap;
-	ComPtr<ID3D12Resource> cbvUploadHeap;
+	ComPtr<ID3D12Resource> cbvUploadHeapList[frameBufferCount];
 	UINT cbvDescriptorHeapSize;
-	void* cbvHeapBegin;
+	void* cbvHeapBegin[frameBufferCount];
 	ComPtr<ID3D12CommandAllocator> commandAllocator[frameBufferCount];
 	ComPtr<ID3D12GraphicsCommandList> commandList;
 	ComPtr<ID3D12Fence> fence;
@@ -65,46 +151,15 @@ struct Direct3DStuff {
 	ComPtr<ID3DBlob> vertexShaderBlob;
 	ComPtr<ID3DBlob> pixelShaderBlob;
 
-	ConstantBuffer cbColorMultiplier;
-};
+	ConstantBuffer cbPerObject;
 
-/**
-* Vertex構造体のレイアウト.
-*/
-D3D12_INPUT_ELEMENT_DESC vertexLayout[] = {
-	{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-	{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-};
+	DirectX::XMFLOAT4X4 matProjection;
+	DirectX::XMFLOAT4X4 matView;
+	DirectX::XMFLOAT4 cameraPos;
+	DirectX::XMFLOAT4 cameraTarget;
+	DirectX::XMFLOAT4 cameraUp;
 
-/**
-* 頂点データ型.
-*/
-struct Vertex {
-	DirectX::XMFLOAT3 pos;
-	DirectX::XMFLOAT4 col;
-};
-
-/**
-* 頂点データ配列.
-*/
-Vertex vertexList[] = {
-	{ DirectX::XMFLOAT3(-0.5f, 0.5f, 0.5f), DirectX::XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
-	{ DirectX::XMFLOAT3(0.5f, -0.5f, 0.5f), DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
-	{ DirectX::XMFLOAT3(-0.5f, -0.5f, 0.5f), DirectX::XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
-	{ DirectX::XMFLOAT3(0.5f, 0.5f, 0.5f), DirectX::XMFLOAT4(1.0f, 0.0f, 1.0f, 1.0f) },
-
-	{ DirectX::XMFLOAT3(-0.75f, 0.75f, 0.7f), DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
-	{ DirectX::XMFLOAT3(0.0f, 0.0f, 0.7f), DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
-	{ DirectX::XMFLOAT3(-0.75f, 0.0f, 0.7f), DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
-	{ DirectX::XMFLOAT3(0.0f, 0.75f, 0.7f), DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
-};
-
-/**
-* インデックスデータ配列.
-*/
-UINT indexList[] = {
-	0, 1, 2,
-	0, 3, 1,
+	ObjectState objectState[objectCount];
 };
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -256,6 +311,15 @@ bool Init3D(Direct3DStuff& d3dStuff)
 {
 	HRESULT hr;
 
+#if !defined(NDEBUG)
+	// Enable the D3D12 debug layer.
+	{
+		ComPtr<ID3D12Debug> debugController;
+		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
+			debugController->EnableDebugLayer();
+		}
+	}
+#endif
 	IDXGIFactory4* dxgiFactory;
 	hr = CreateDXGIFactory1(IID_PPV_ARGS(&dxgiFactory));
 	if (FAILED(hr)) {
@@ -368,44 +432,46 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	d3dStuff.device->CreateDepthStencilView(d3dStuff.depthStencilbuffer.Get(), &depthStencilDesc, d3dStuff.dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
 	// 定数バッファを作成.
+	DirectX::XMStoreFloat4x4(&d3dStuff.cbPerObject.wvpMatrix, DirectX::XMMatrixIdentity());
 	D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
 	cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	cbvHeapDesc.NumDescriptors = d3dStuff.frameBufferCount;
+	cbvHeapDesc.NumDescriptors = d3dStuff.objectCount * d3dStuff.frameBufferCount;
 	cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	hr = d3dStuff.device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(d3dStuff.cbvDescriptorHeap.GetAddressOf()));
 	if (FAILED(hr)) {
 		return false;
 	}
 	d3dStuff.cbvDescriptorHeapSize = d3dStuff.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	hr = d3dStuff.device->CreateCommittedResource(
-		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-		D3D12_HEAP_FLAG_NONE,
-		&CD3DX12_RESOURCE_DESC::Buffer(sizeof(ConstantBuffer) * d3dStuff.frameBufferCount),
-		D3D12_RESOURCE_STATE_GENERIC_READ,
-		nullptr,
-		IID_PPV_ARGS(d3dStuff.cbvUploadHeap.GetAddressOf())
-	);
-	if (FAILED(hr)) {
-		return false;
-	}
-	d3dStuff.cbvUploadHeap->SetName(L"CBV Upload Heap");
 	D3D12_CPU_DESCRIPTOR_HANDLE cbvCpuHandle = d3dStuff.cbvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-	cbvDesc.BufferLocation = d3dStuff.cbvUploadHeap->GetGPUVirtualAddress();
-	cbvDesc.SizeInBytes = sizeof(ConstantBuffer);
 	for (int i = 0; i < d3dStuff.frameBufferCount; ++i) {
-		d3dStuff.device->CreateConstantBufferView(&cbvDesc, cbvCpuHandle);
-		cbvDesc.BufferLocation += sizeof(ConstantBuffer);
-		cbvCpuHandle.ptr += d3dStuff.cbvDescriptorHeapSize;
+		hr = d3dStuff.device->CreateCommittedResource(
+			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+			D3D12_HEAP_FLAG_NONE,
+			&CD3DX12_RESOURCE_DESC::Buffer(AlignedConstantBufferSize * d3dStuff.objectCount),
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(d3dStuff.cbvUploadHeapList[i].GetAddressOf())
+		);
+		if (FAILED(hr)) {
+			return false;
+		}
+		d3dStuff.cbvUploadHeapList[i]->SetName(L"CBV Upload Heap");
+		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
+		cbvDesc.BufferLocation = d3dStuff.cbvUploadHeapList[i]->GetGPUVirtualAddress();
+		cbvDesc.SizeInBytes = AlignedConstantBufferSize;
+		for (int j = 0; j < d3dStuff.objectCount; ++j) {
+			d3dStuff.device->CreateConstantBufferView(&cbvDesc, cbvCpuHandle);
+			cbvDesc.BufferLocation += AlignedConstantBufferSize;
+			cbvCpuHandle.ptr += d3dStuff.cbvDescriptorHeapSize;
+		}
+		D3D12_RANGE  cbvRange = { 0, 0 };
+		hr = d3dStuff.cbvUploadHeapList[i]->Map(0, &cbvRange, &d3dStuff.cbvHeapBegin[i]);
+		if (FAILED(hr)) {
+			return false;
+		}
+		memcpy(d3dStuff.cbvHeapBegin[i], &d3dStuff.cbPerObject, sizeof(d3dStuff.cbPerObject));
+		memcpy(static_cast<uint8_t*>(d3dStuff.cbvHeapBegin[i]) + AlignedConstantBufferSize, &d3dStuff.cbPerObject, sizeof(d3dStuff.cbPerObject));
 	}
-	d3dStuff.cbColorMultiplier.color = DirectX::XMFLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
-	std::fill(d3dStuff.cbColorMultiplier.padding, d3dStuff.cbColorMultiplier.padding + _countof(d3dStuff.cbColorMultiplier.padding), 0);
-	D3D12_RANGE  cbvRange = { 0, 0 };
-	hr = d3dStuff.cbvUploadHeap->Map(0, &cbvRange, &d3dStuff.cbvHeapBegin);
-	if (FAILED(hr)) {
-		return false;
-	}
-	memcpy(d3dStuff.cbvHeapBegin, &d3dStuff.cbColorMultiplier, sizeof(d3dStuff.cbColorMultiplier));
 
 	// コマンドアロケータを作成.
 	// コマンドアロケータは描画中にGPUが実行する各コマンドを保持する.
@@ -448,16 +514,10 @@ bool Init3D(Direct3DStuff& d3dStuff)
 
 	// ルートシグネチャを作成.
 	{
-		D3D12_DESCRIPTOR_RANGE descRangeList[1];
-		descRangeList[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-		descRangeList[0].NumDescriptors = 1;
-		descRangeList[0].BaseShaderRegister = 0;
-		descRangeList[0].RegisterSpace = 0;
-		descRangeList[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 		D3D12_ROOT_PARAMETER rootParameterList[1];
-		rootParameterList[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-		rootParameterList[0].DescriptorTable.NumDescriptorRanges = _countof(descRangeList);
-		rootParameterList[0].DescriptorTable.pDescriptorRanges = descRangeList;
+		rootParameterList[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+		rootParameterList[0].Descriptor.RegisterSpace = 0;
+		rootParameterList[0].Descriptor.ShaderRegister = 0;
 		rootParameterList[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
 		D3D12_ROOT_SIGNATURE_DESC rsDesc = {
 			_countof(rootParameterList),
@@ -632,6 +692,46 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	d3dStuff.scissorRect.right = d3dStuff.width;
 	d3dStuff.scissorRect.bottom = d3dStuff.height;
 
+	DirectX::XMStoreFloat4x4(
+		&d3dStuff.matProjection,
+		DirectX::XMMatrixPerspectiveFovLH(
+			45.0f * 3.14f / 180.0f,
+			static_cast<float>(d3dStuff.width) / static_cast<float>(d3dStuff.height),
+			0.1f,
+			1000.0f
+		)
+	);
+	d3dStuff.cameraPos = DirectX::XMFLOAT4(0.0f, 2.0f, -4.0f, 0.0f);
+	d3dStuff.cameraTarget = DirectX::XMFLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
+	d3dStuff.cameraUp = DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 0.0f);
+	DirectX::XMStoreFloat4x4(
+		&d3dStuff.matView,
+		DirectX::XMMatrixLookAtLH(
+			DirectX::XMLoadFloat4(&d3dStuff.cameraPos),
+			DirectX::XMLoadFloat4(&d3dStuff.cameraTarget),
+			DirectX::XMLoadFloat4(&d3dStuff.cameraUp)
+		)
+	);
+
+	d3dStuff.objectState[0].pos = DirectX::XMFLOAT4(0.0f, 0.0f, 0.0f, 0.0f);
+	DirectX::XMStoreFloat4x4(&d3dStuff.objectState[0].matRot, DirectX::XMMatrixIdentity());
+	DirectX::XMStoreFloat4x4(
+		&d3dStuff.objectState[0].matWorld,
+		DirectX::XMMatrixTranslationFromVector(DirectX::XMLoadFloat4(&d3dStuff.objectState[0].pos))
+	);
+
+	d3dStuff.objectState[1].pos = DirectX::XMFLOAT4(1.5f, 0.0f, 0.0f, 0.0f);
+	DirectX::XMStoreFloat4x4(&d3dStuff.objectState[1].matRot, DirectX::XMMatrixIdentity());
+	DirectX::XMStoreFloat4x4(
+		&d3dStuff.objectState[1].matWorld,
+		DirectX::XMMatrixTranslationFromVector(
+			DirectX::XMVectorAdd(
+				DirectX::XMLoadFloat4(&d3dStuff.objectState[1].pos),
+				DirectX::XMLoadFloat4(&d3dStuff.objectState[0].pos)
+			)
+		)
+	);
+
 	d3dStuff.initialized = true;
 
 	return true;
@@ -716,14 +816,6 @@ void Render(Direct3DStuff& d3dStuff)
 	static const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
 	d3dStuff.commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 	d3dStuff.commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
-
-	// 定数バッファを指定.
-	ID3D12DescriptorHeap* cbvHeapList[] = { d3dStuff.cbvDescriptorHeap.Get() };
-	d3dStuff.commandList->SetDescriptorHeaps(_countof(cbvHeapList), cbvHeapList);
-	D3D12_GPU_DESCRIPTOR_HANDLE cbvHandle = d3dStuff.cbvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-	cbvHandle.ptr += d3dStuff.frameIndex * d3dStuff.cbvDescriptorHeapSize;
-	d3dStuff.commandList->SetGraphicsRootDescriptorTable(0, cbvHandle);
 
 	// 頂点を描画.
 	d3dStuff.commandList->SetGraphicsRootSignature(d3dStuff.rootSignature.Get());
@@ -732,8 +824,14 @@ void Render(Direct3DStuff& d3dStuff)
 	d3dStuff.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	d3dStuff.commandList->IASetVertexBuffers(0, 1, &d3dStuff.vertexBufferView);
 	d3dStuff.commandList->IASetIndexBuffer(&d3dStuff.indexBufferView);
-	d3dStuff.commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
-	d3dStuff.commandList->DrawIndexedInstanced(6, 1, 0, 4, 0);
+
+	D3D12_GPU_VIRTUAL_ADDRESS gpuAddress = d3dStuff.cbvUploadHeapList[d3dStuff.frameIndex]->GetGPUVirtualAddress();
+	for (int i = 0; i < d3dStuff.objectCount; ++i) {
+		d3dStuff.commandList->SetGraphicsRootConstantBufferView(0, gpuAddress);
+		d3dStuff.commandList->DrawIndexedInstanced(_countof(indexList), 1, 0, 0, 0);
+		gpuAddress += AlignedConstantBufferSize;
+	}
+	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 
 	hr = d3dStuff.commandList->Close();
 	if (FAILED(hr)) {
@@ -761,35 +859,47 @@ void Render(Direct3DStuff& d3dStuff)
 */
 void Update(Direct3DStuff& d3dStuff)
 {
+#if 0
 	static DirectX::XMFLOAT4 colorIncrimentValue(0.00002f, 0.00006f, 0.00009f, 0.0f);
 
-	d3dStuff.cbColorMultiplier.color.x += colorIncrimentValue.x;
-	if (d3dStuff.cbColorMultiplier.color.x >= 1.0f) {
-		d3dStuff.cbColorMultiplier.color.x = 1.0f;
+	d3dStuff.cbPerObject.color.x += colorIncrimentValue.x;
+	if (d3dStuff.cbPerObject.color.x >= 1.0f) {
+		d3dStuff.cbPerObject.color.x = 1.0f;
 		colorIncrimentValue.x *= -1.0f;
-	} else if (d3dStuff.cbColorMultiplier.color.x < 0.0f) {
-		d3dStuff.cbColorMultiplier.color.x = 0.0f;
+	} else if (d3dStuff.cbPerObject.color.x < 0.0f) {
+		d3dStuff.cbPerObject.color.x = 0.0f;
 		colorIncrimentValue.x *= -1.0f;
 	}
-	d3dStuff.cbColorMultiplier.color.y += colorIncrimentValue.y;
-	if (d3dStuff.cbColorMultiplier.color.y >= 1.0f) {
-		d3dStuff.cbColorMultiplier.color.y = 1.0f;
+	d3dStuff.cbPerObject.color.y += colorIncrimentValue.y;
+	if (d3dStuff.cbPerObject.color.y >= 1.0f) {
+		d3dStuff.cbPerObject.color.y = 1.0f;
 		colorIncrimentValue.y *= -1.0f;
-	} else if (d3dStuff.cbColorMultiplier.color.y < 0.0f) {
-		d3dStuff.cbColorMultiplier.color.y = 0.0f;
+	} else if (d3dStuff.cbPerObject.color.y < 0.0f) {
+		d3dStuff.cbPerObject.color.y = 0.0f;
 		colorIncrimentValue.y *= -1.0f;
 	}
-	d3dStuff.cbColorMultiplier.color.z += colorIncrimentValue.z;
-	if (d3dStuff.cbColorMultiplier.color.z >= 1.0f) {
-		d3dStuff.cbColorMultiplier.color.z = 1.0f;
+	d3dStuff.cbPerObject.color.z += colorIncrimentValue.z;
+	if (d3dStuff.cbPerObject.color.z >= 1.0f) {
+		d3dStuff.cbPerObject.color.z = 1.0f;
 		colorIncrimentValue.z *= -1.0f;
-	} else if (d3dStuff.cbColorMultiplier.color.z < 0.0f) {
-		d3dStuff.cbColorMultiplier.color.z = 0.0f;
+	} else if (d3dStuff.cbPerObject.color.z < 0.0f) {
+		d3dStuff.cbPerObject.color.z = 0.0f;
 		colorIncrimentValue.z *= -1.0f;
 	}
 	memcpy(
-		static_cast<uint8_t*>(d3dStuff.cbvHeapBegin) + d3dStuff.frameIndex * sizeof(d3dStuff.cbColorMultiplier),
-		&d3dStuff.cbColorMultiplier,
-		sizeof(d3dStuff.cbColorMultiplier)
+		static_cast<uint8_t*>(d3dStuff.cbvHeapBegin[d3dStuff.frameIndex]),
+		&d3dStuff.cbPerObject,
+		sizeof(d3dStuff.cbPerObject)
+	);
+#endif
+	memcpy(
+		static_cast<uint8_t*>(d3dStuff.cbvHeapBegin[d3dStuff.frameIndex]),
+		&d3dStuff.cbPerObject,
+		sizeof(d3dStuff.cbPerObject)
+	);
+	memcpy(
+		static_cast<uint8_t*>(d3dStuff.cbvHeapBegin[d3dStuff.frameIndex]) + AlignedConstantBufferSize,
+		&d3dStuff.cbPerObject,
+		sizeof(d3dStuff.cbPerObject)
 	);
 }
