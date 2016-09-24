@@ -152,9 +152,11 @@
   <ItemGroup>
     <ClInclude Include="Src\d3dx12.h" />
     <ClInclude Include="Src\stdafx.h" />
+    <ClInclude Include="Src\Texture.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Src\Main.cpp" />
+    <ClCompile Include="Src\Texture.cpp" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Res\PixelShader.hlsl">
