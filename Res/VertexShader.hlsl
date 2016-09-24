@@ -9,6 +9,7 @@
 struct VSInput {
 	float3 pos : POSITION;
 	float4 col : COLOR;
+	float2 texCoord : TEXCOORD;
 };
 
 /**

@@ -8,8 +8,18 @@
 #include <wrl/event.h>
 #include <vector>
 
+/**
+* テクスチャ関連の機能や値を格納する名前空間.
+*/
 namespace Texture {
 
+	/**
+	* テクスチャ読み込みクラス.
+	*
+	* コンストラクタで初期化され、デストラクタで破棄される.
+	* 初期化に失敗した場合は例外が投げられる.
+	* 初期化に成功したのち、LoadFromFile()関数でテクスチャをバイト列として読み込む.
+	*/
 	class Loader
 	{
 	public:
