@@ -87,6 +87,94 @@ UINT indexList[] = {
 };
 
 /**
+* フォント描画用頂点データレイアウト.
+*/
+D3D12_INPUT_ELEMENT_DESC fontVertexLayout[] = {
+	{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+	{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+	{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 28, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+};
+
+/**
+* フォント描画用頂点データ型.
+*/
+struct FontVertex {
+	constexpr FontVertex(float x, float y, float z, float r, float g, float b, float a, float u, float v) : pos(x, y, z), col(r, g, b, a), texCoord(u, v) {}
+	DirectX::XMFLOAT3 pos;
+	DirectX::XMFLOAT4 col;
+	DirectX::XMFLOAT2 texCoord;
+};
+
+/**
+* フォントキャラクタデータ型.
+*/
+struct FontChar {
+	int id; ///< 文字のユニコード.
+	DirectX::XMFLOAT2 uv; ///< テクスチャ上の左上座標.
+	DirectX::XMFLOAT2 tsize; ///< テクスチャ上の縦横サイズ.
+	DirectX::XMFLOAT2 ssize; ///< スクリーン座標上の縦横サイズ.
+	DirectX::XMFLOAT2 offset; ///< カーソル位置から実際の表示位置へのオフセット.
+	float xadvance; ///< 次のキャラクタの表示開始位置への右方向のオフセット.
+};
+
+/**
+* フォントのカーニング情報型.
+*/
+struct FontKerning
+{
+	int first; ///< 左側の文字のユニコード.
+	int second; ///< 右側の文字のユニコード.
+	float amount; ///< 右側の文字のX表示座標に加算する移動量.
+};
+
+/**
+* フォント情報型.
+*/
+struct Font {
+	std::wstring name;
+	std::wstring fontImage;
+	int size;
+	float lineHeight;
+	float baseHeight;
+	int textureWidth;
+	int textureHeight;
+	std::vector<FontChar> charList;
+	std::vector<FontKerning> kerningList;
+	ComPtr<ID3D12Resource> textureBuffer;
+	D3D12_GPU_DESCRIPTOR_HANDLE srvHandle;
+	float leftPadding;
+	float topPadding;
+	float rightPadding;
+	float bottomPadding;
+
+	float GetKerning(wchar_t first, wchar_t second) const
+	{
+		auto result = std::find_if(
+			kerningList.begin(),
+			kerningList.end(),
+			[first, second](const FontKerning& k) { return k.first == first && k.second == second; }
+		);
+		if (result != kerningList.end()) {
+			return result->amount;
+		}
+		return 0.0f;
+	}
+
+	const FontChar* GetChar(wchar_t c) const
+	{
+		auto result = std::find_if(
+			charList.begin(),
+			charList.end(),
+			[c](const FontChar& fontChar) { return fontChar.id == c; }
+		);
+		if (result != charList.end()) {
+			return &*result;
+		}
+		return nullptr;
+	}
+};
+
+/**
 * 定数バッファ型.
 *
 * DirectX 12では、定数バッファのサイズを256バイト単位にすることが要求されている.
