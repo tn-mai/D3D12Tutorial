@@ -19,6 +19,7 @@ struct VSInput {
 struct PSInput {
 	float4 pos : SV_POSITION;
 	float4 col : COLOR;
+	float2 texCoord : TEXCOORD;
 };
 
 /**
@@ -36,7 +37,7 @@ PSInput main(VSInput input)
 {
 	PSInput result;
 	result.pos = mul(float4(input.pos, 1.0f), matWVP);
-	//result.pos = float4(input.pos, 1.0f);
 	result.col = input.col;
+	result.texCoord = input.texCoord;
 	return result;
 }

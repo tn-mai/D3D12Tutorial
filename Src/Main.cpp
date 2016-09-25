@@ -127,9 +127,8 @@ struct Direct3DStuff {
 	ComPtr<ID3D12Resource> renderTargetList[frameBufferCount];
 	ComPtr<ID3D12DescriptorHeap> dsvDescriptorHeap;
 	ComPtr<ID3D12Resource> depthStencilbuffer;
-	ComPtr<ID3D12DescriptorHeap> cbvDescriptorHeap;
+	ComPtr<ID3D12DescriptorHeap> srvDescriptorHeap;
 	ComPtr<ID3D12Resource> cbvUploadHeapList[frameBufferCount];
-	UINT cbvDescriptorHeapSize;
 	void* cbvHeapBegin[frameBufferCount];
 	ComPtr<ID3D12CommandAllocator> commandAllocator[frameBufferCount];
 	ComPtr<ID3D12GraphicsCommandList> commandList;
@@ -439,16 +438,6 @@ bool Init3D(Direct3DStuff& d3dStuff)
 
 	// 定数バッファを作成.
 	DirectX::XMStoreFloat4x4(&d3dStuff.cbPerObject.wvpMatrix, DirectX::XMMatrixIdentity());
-	D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
-	cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	cbvHeapDesc.NumDescriptors = d3dStuff.objectCount * d3dStuff.frameBufferCount;
-	cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	hr = d3dStuff.device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(d3dStuff.cbvDescriptorHeap.GetAddressOf()));
-	if (FAILED(hr)) {
-		return false;
-	}
-	d3dStuff.cbvDescriptorHeapSize = d3dStuff.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	D3D12_CPU_DESCRIPTOR_HANDLE cbvCpuHandle = d3dStuff.cbvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 	for (int i = 0; i < d3dStuff.frameBufferCount; ++i) {
 		hr = d3dStuff.device->CreateCommittedResource(
 			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
@@ -462,14 +451,6 @@ bool Init3D(Direct3DStuff& d3dStuff)
 			return false;
 		}
 		d3dStuff.cbvUploadHeapList[i]->SetName(L"CBV Upload Heap");
-		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-		cbvDesc.BufferLocation = d3dStuff.cbvUploadHeapList[i]->GetGPUVirtualAddress();
-		cbvDesc.SizeInBytes = AlignedConstantBufferSize;
-		for (int j = 0; j < d3dStuff.objectCount; ++j) {
-			d3dStuff.device->CreateConstantBufferView(&cbvDesc, cbvCpuHandle);
-			cbvDesc.BufferLocation += AlignedConstantBufferSize;
-			cbvCpuHandle.ptr += d3dStuff.cbvDescriptorHeapSize;
-		}
 		D3D12_RANGE  cbvRange = { 0, 0 };
 		hr = d3dStuff.cbvUploadHeapList[i]->Map(0, &cbvRange, &d3dStuff.cbvHeapBegin[i]);
 		if (FAILED(hr)) {
@@ -519,6 +500,9 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	}
 
 	// ルートシグネチャを作成.
+	// ルートパラメータのShaderVisibilityは適切に設定する必要がある.
+	// ルートシグネチャが正しく設定されていない場合でも、シグネチャの作成には成功することがある.
+	// しかしその場合、PSO作成時にエラーが発生する.
 	{
 		D3D12_DESCRIPTOR_RANGE descRange[1] = {};
 		descRange[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
@@ -534,9 +518,9 @@ bool Init3D(Direct3DStuff& d3dStuff)
 		rootParameterList[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 		rootParameterList[1].DescriptorTable.NumDescriptorRanges = _countof(descRange);
 		rootParameterList[1].DescriptorTable.pDescriptorRanges = descRange;
-		rootParameterList[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+		rootParameterList[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 		D3D12_STATIC_SAMPLER_DESC sampler[1] = {};
-		sampler[0].Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+		sampler[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
 		sampler[0].AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
 		sampler[0].AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
 		sampler[0].AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
@@ -695,6 +679,63 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	d3dStuff.indexBufferView.SizeInBytes = sizeof(indexList);
 	d3dStuff.indexBufferView.Format = DXGI_FORMAT_R32_UINT;
 
+	// テクスチャを読み込む.
+	Texture::Loader textureLoader;
+	D3D12_RESOURCE_DESC textureDesc;
+	int imageBytesPerRow;
+	std::vector<uint8_t> imageData;
+	if (!textureLoader.LoadFromFile(L"Res/rock_s.png", imageData, textureDesc, imageBytesPerRow)) {
+		return false;
+	}
+	hr = d3dStuff.device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE,
+		&textureDesc,
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		nullptr,
+		IID_PPV_ARGS(d3dStuff.textureBuffer.GetAddressOf())
+	);
+	if (FAILED(hr)) {
+		return false;
+	}
+	d3dStuff.textureBuffer->SetName(L"Texture Buffer");
+	UINT64 textureHeapSize;
+	d3dStuff.device->GetCopyableFootprints(&textureDesc, 0, 1, 0, nullptr, nullptr, nullptr, &textureHeapSize);
+	hr = d3dStuff.device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(textureHeapSize),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(d3dStuff.textureBufferUploadHeap.GetAddressOf())
+	);
+	if (FAILED(hr)) {
+		return false;
+	}
+	d3dStuff.textureBufferUploadHeap->SetName(L"Texture Upload Heap");
+	D3D12_SUBRESOURCE_DATA textureData = {};
+	textureData.pData = imageData.data();
+	textureData.RowPitch = imageBytesPerRow;
+	textureData.SlicePitch = imageBytesPerRow * textureDesc.Height;
+	UpdateSubresources<1>(d3dStuff.commandList.Get(), d3dStuff.textureBuffer.Get(), d3dStuff.textureBufferUploadHeap.Get(), 0, 0, 1, &textureData);
+	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.textureBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+
+	D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
+	cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	cbvHeapDesc.NumDescriptors = 1;
+	cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+	hr = d3dStuff.device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(d3dStuff.srvDescriptorHeap.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDesc.Format = textureDesc.Format;
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	srvDesc.Texture2D.MipLevels = 1;
+	d3dStuff.device->CreateShaderResourceView(d3dStuff.textureBuffer.Get(), &srvDesc, d3dStuff.srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
+	// ここまでに積まれたコマンドを実行.
 	hr = d3dStuff.commandList->Close();
 	if (FAILED(hr)) {
 		return false;
@@ -774,6 +815,7 @@ bool Init3D(Direct3DStuff& d3dStuff)
 */
 bool Initialize(Direct3DStuff& d3dStuff)
 {
+	CoInitialize(nullptr);
 	if (!Init3D(d3dStuff)) {
 		return false;
 	}
@@ -800,6 +842,7 @@ void Finalize(Direct3DStuff& d3dStuff)
 	if (d3dStuff.fenceEvent) {
 		CloseHandle(d3dStuff.fenceEvent);
 	}
+	CoUninitialize();
 }
 
 /**
@@ -848,6 +891,9 @@ void Render(Direct3DStuff& d3dStuff)
 
 	// 頂点を描画.
 	d3dStuff.commandList->SetGraphicsRootSignature(d3dStuff.rootSignature.Get());
+	ID3D12DescriptorHeap* heapList[] = { d3dStuff.srvDescriptorHeap.Get() };
+	d3dStuff.commandList->SetDescriptorHeaps(_countof(heapList), heapList);
+	d3dStuff.commandList->SetGraphicsRootDescriptorTable(1, d3dStuff.srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 	d3dStuff.commandList->RSSetViewports(1, &d3dStuff.viewport);
 	d3dStuff.commandList->RSSetScissorRects(1, &d3dStuff.scissorRect);
 	d3dStuff.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);

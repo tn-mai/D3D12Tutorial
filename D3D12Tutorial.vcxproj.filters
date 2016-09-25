@@ -37,4 +37,9 @@
       <Filter>Res</Filter>
     </FxCompile>
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="Res\rock_s.png">
+      <Filter>Res</Filter>
+    </Image>
+  </ItemGroup>
 </Project>
