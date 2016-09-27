@@ -420,6 +420,63 @@ bool LoadShader(const wchar_t* filename, const char* target, ComPtr<ID3DBlob>& b
 }
 
 /**
+* データをGPUにアップロードする
+*
+* @param buffer アップロード先のリソース情報を格納するオブジェクト.
+* @param uploadBuffer アップロード用の中間バッファの情報を格納するオブジェクト.
+*                     アップロード完了まで保持しなければならない.
+* @param d3dStuff Direct3D管理オブジェクト.
+*                 この関数はDirect3DStuffが保持するデバイスとコマンドリストを使用して、データのアップロードを行う.
+* @param desc 作成するリソースの詳細情報のアドレス.
+* @param data アップロードするデータのアドレス.
+* @param dataSize アップロードするデータのバイト数.
+*
+* @retval true アップロード成功.
+*              bufferのGetGPUAddress()によって、アップロード先のアドレスを得ることが出来る.
+*              実際にアップロードを行うには、コマンドリストをコマンドキューに入れて実行する必要があることに注意.
+* @retval false アップロード失敗.
+*               bufferは不完全な状態にある. 速やかに破棄すること.
+*/
+bool UploadToGpuMemory(ComPtr<ID3D12Resource>& buffer, ComPtr<ID3D12Resource>& uploadBuffer, Direct3DStuff& d3dStuff, const D3D12_RESOURCE_DESC* desc, const void* data, size_t dataSize, int rowPitch, int slicePitch, D3D12_RESOURCE_STATES finishState, const wchar_t* bufferName = nullptr)
+{
+	HRESULT hr = d3dStuff.device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE,
+		desc,
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		nullptr,
+		IID_PPV_ARGS(buffer.GetAddressOf())
+	);
+	if (FAILED(hr)) {
+		return false;
+	}
+	if (bufferName) {
+		buffer->SetName(bufferName);
+	}
+	hr = d3dStuff.device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(dataSize),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(uploadBuffer.GetAddressOf())
+	);
+	if (FAILED(hr)) {
+		return false;
+	}
+	uploadBuffer->SetName((std::wstring(bufferName) + L" Uplaod Heap").c_str());
+	D3D12_SUBRESOURCE_DATA vertexData = {};
+	vertexData.pData = data;
+	vertexData.RowPitch = rowPitch;
+	vertexData.SlicePitch = slicePitch;
+	if (UpdateSubresources<1>(d3dStuff.commandList.Get(), buffer.Get(), uploadBuffer.Get(), 0, 0, 1, &vertexData) == 0) {
+		return false;
+	}
+	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(buffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, finishState));
+	return true;
+}
+
+/**
 * Direct3Dの初期化.
 *
 * @retval true 初期化成功.
@@ -703,81 +760,19 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	}
 
 	// 頂点バッファを作成.
-	hr = d3dStuff.device->CreateCommittedResource(
-		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-		D3D12_HEAP_FLAG_NONE,
-		&CD3DX12_RESOURCE_DESC::Buffer(sizeof(vertexList)),
-		D3D12_RESOURCE_STATE_COPY_DEST,
-		nullptr,
-		IID_PPV_ARGS(d3dStuff.vertexBuffer.GetAddressOf())
-	);
-	if (FAILED(hr)) {
-		return false;
-	}
-	d3dStuff.vertexBuffer->SetName(L"Vertex Buffer");
-
-	// 頂点バッファに頂点データ配列を転送.
 	ComPtr<ID3D12Resource> vbUploadHeap;
-	hr = d3dStuff.device->CreateCommittedResource(
-		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-		D3D12_HEAP_FLAG_NONE,
-		&CD3DX12_RESOURCE_DESC::Buffer(sizeof(vertexList)),
-		D3D12_RESOURCE_STATE_GENERIC_READ,
-		nullptr,
-		IID_PPV_ARGS(vbUploadHeap.GetAddressOf())
-	);
-	if (FAILED(hr)) {
+	if (!UploadToGpuMemory(d3dStuff.vertexBuffer, vbUploadHeap, d3dStuff, &CD3DX12_RESOURCE_DESC::Buffer(sizeof(vertexList)), vertexList, sizeof(vertexList), sizeof(vertexList), sizeof(vertexList), D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, L"Vertex Buffer")) {
 		return false;
 	}
-	vbUploadHeap->SetName(L"Vertex Buffer Uplaod Heap");
-	D3D12_SUBRESOURCE_DATA vertexData = {};
-	vertexData.pData = vertexList;
-	vertexData.RowPitch = sizeof(vertexList);
-	vertexData.SlicePitch = sizeof(vertexList);
-	if (UpdateSubresources<1>(d3dStuff.commandList.Get(), d3dStuff.vertexBuffer.Get(), vbUploadHeap.Get(), 0, 0, 1, &vertexData) == 0) {
-		return false;
-	}
-	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.vertexBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER));
 	d3dStuff.vertexBufferView.BufferLocation = d3dStuff.vertexBuffer->GetGPUVirtualAddress();
 	d3dStuff.vertexBufferView.StrideInBytes = sizeof(Vertex);
 	d3dStuff.vertexBufferView.SizeInBytes = sizeof(vertexList);
 
 	// インデックスバッファを作成.
-	hr = d3dStuff.device->CreateCommittedResource(
-		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-		D3D12_HEAP_FLAG_NONE,
-		&CD3DX12_RESOURCE_DESC::Buffer(sizeof(indexList)),
-		D3D12_RESOURCE_STATE_COPY_DEST,
-		nullptr,
-		IID_PPV_ARGS(d3dStuff.indexBuffer.GetAddressOf())
-	);
-	if (FAILED(hr)) {
-		return false;
-	}
-	d3dStuff.indexBuffer->SetName(L"Index Buffer");
-
-	// インデックスバッファにインデックスデータ配列を転送.
 	ComPtr<ID3D12Resource> ibUploadHeap;
-	hr = d3dStuff.device->CreateCommittedResource(
-		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-		D3D12_HEAP_FLAG_NONE,
-		&CD3DX12_RESOURCE_DESC::Buffer(sizeof(indexList)),
-		D3D12_RESOURCE_STATE_GENERIC_READ,
-		nullptr,
-		IID_PPV_ARGS(ibUploadHeap.GetAddressOf())
-	);
-	if (FAILED(hr)) {
+	if (!UploadToGpuMemory(d3dStuff.indexBuffer, ibUploadHeap, d3dStuff, &CD3DX12_RESOURCE_DESC::Buffer(sizeof(indexList)), indexList, sizeof(indexList), sizeof(indexList), sizeof(indexList), D3D12_RESOURCE_STATE_INDEX_BUFFER, L"Index Buffer")) {
 		return false;
 	}
-	ibUploadHeap->SetName(L"Index Buffer Upload Heap");
-	D3D12_SUBRESOURCE_DATA indexData = {};
-	indexData.pData = indexList;
-	indexData.RowPitch = sizeof(indexList);
-	indexData.SlicePitch = sizeof(indexList);
-	if (UpdateSubresources<1>(d3dStuff.commandList.Get(), d3dStuff.indexBuffer.Get(), ibUploadHeap.Get(), 0, 0, 1, &indexData) == 0) {
-		return false;
-	}
-	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.indexBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER));
 	d3dStuff.indexBufferView.BufferLocation = d3dStuff.indexBuffer->GetGPUVirtualAddress();
 	d3dStuff.indexBufferView.SizeInBytes = sizeof(indexList);
 	d3dStuff.indexBufferView.Format = DXGI_FORMAT_R32_UINT;
@@ -790,38 +785,12 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	if (!textureLoader.LoadFromFile(L"Res/rock_s.png", imageData, textureDesc, imageBytesPerRow)) {
 		return false;
 	}
-	hr = d3dStuff.device->CreateCommittedResource(
-		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-		D3D12_HEAP_FLAG_NONE,
-		&textureDesc,
-		D3D12_RESOURCE_STATE_COPY_DEST,
-		nullptr,
-		IID_PPV_ARGS(d3dStuff.textureBuffer.GetAddressOf())
-	);
-	if (FAILED(hr)) {
-		return false;
-	}
-	d3dStuff.textureBuffer->SetName(L"Texture Buffer");
 	UINT64 textureHeapSize;
 	d3dStuff.device->GetCopyableFootprints(&textureDesc, 0, 1, 0, nullptr, nullptr, nullptr, &textureHeapSize);
-	hr = d3dStuff.device->CreateCommittedResource(
-		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-		D3D12_HEAP_FLAG_NONE,
-		&CD3DX12_RESOURCE_DESC::Buffer(textureHeapSize),
-		D3D12_RESOURCE_STATE_GENERIC_READ,
-		nullptr,
-		IID_PPV_ARGS(d3dStuff.textureBufferUploadHeap.GetAddressOf())
-	);
-	if (FAILED(hr)) {
+	ComPtr<ID3D12Resource> textureUploadHeap;
+	if (!UploadToGpuMemory(d3dStuff.textureBuffer, textureUploadHeap, d3dStuff, &textureDesc, imageData.data(), textureHeapSize, imageBytesPerRow, imageBytesPerRow * textureDesc.Height, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, L"Textre Buffer")) {
 		return false;
 	}
-	d3dStuff.textureBufferUploadHeap->SetName(L"Texture Upload Heap");
-	D3D12_SUBRESOURCE_DATA textureData = {};
-	textureData.pData = imageData.data();
-	textureData.RowPitch = imageBytesPerRow;
-	textureData.SlicePitch = imageBytesPerRow * textureDesc.Height;
-	UpdateSubresources<1>(d3dStuff.commandList.Get(), d3dStuff.textureBuffer.Get(), d3dStuff.textureBufferUploadHeap.Get(), 0, 0, 1, &textureData);
-	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.textureBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
 
 	D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
 	cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
