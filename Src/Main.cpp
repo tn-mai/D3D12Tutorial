@@ -397,6 +397,29 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 }
 
 /**
+* シェーダを読み込む.
+*
+* @param filename シェーダファイル名.
+* @param target   対象とするシェーダバージョン.
+* @param blob     読み込んだシェーダを格納するBlobオブジェクト.
+*
+* @retval true 読み込み成功.
+* @retval false 読み込み失敗.
+*/
+bool LoadShader(const wchar_t* filename, const char* target, ComPtr<ID3DBlob>& blob)
+{
+	ComPtr<ID3DBlob> errorBuffer;
+	HRESULT hr = D3DCompileFromFile(filename, nullptr, nullptr, "main", target, D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION, 0, blob.GetAddressOf(), errorBuffer.GetAddressOf());
+	if (FAILED(hr)) {
+		if (errorBuffer) {
+			OutputDebugStringA(static_cast<char*>(errorBuffer->GetBufferPointer()));
+		}
+		return false;
+	}
+	return true;
+}
+
+/**
 * Direct3Dの初期化.
 *
 * @retval true 初期化成功.
@@ -644,21 +667,11 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	}
 
 	// 頂点シェーダを作成.
-	ComPtr<ID3DBlob> errorBuffer;
-	hr = D3DCompileFromFile(L"Res/VertexShader.hlsl", nullptr, nullptr, "main", "vs_5_0", D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION, 0, d3dStuff.vertexShaderBlob.GetAddressOf(), errorBuffer.GetAddressOf());
-	if (FAILED(hr)) {
-		if (errorBuffer) {
-			OutputDebugStringA(static_cast<char*>(errorBuffer->GetBufferPointer()));
-		}
+	if (!LoadShader(L"Res/VertexShader.hlsl", "vs_5_0", d3dStuff.vertexShaderBlob)) {
 		return false;
 	}
-
 	// ピクセルシェーダを作成.
-	hr = D3DCompileFromFile(L"Res/PixelShader.hlsl", nullptr, nullptr, "main", "ps_5_0", D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION, 0, d3dStuff.pixelShaderBlob.GetAddressOf(), errorBuffer.GetAddressOf());
-	if (FAILED(hr)) {
-		if (errorBuffer) {
-			OutputDebugStringA(static_cast<char*>(errorBuffer->GetBufferPointer()));
-		}
+	if (!LoadShader(L"Res/PixelShader.hlsl", "ps_5_0", d3dStuff.pixelShaderBlob)) {
 		return false;
 	}
 
