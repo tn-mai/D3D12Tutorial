@@ -284,6 +284,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prevInstance, PWSTR cmdLine, i
 	int width = 800;
 	int height = 600;
 
+	// D3D12非対応ハードウェアではWARPデバイスを使うことになるが、WARPデバイスはフルスクリーンモードに対応していない.
+	// そのため、スクリーン全体を覆うような縁・タイトルバーなしのウィンドウを作ることで代用する.
 	if (fullScreen) {
 		HMONITOR hm = MonitorFromWindow(nullptr, MONITOR_DEFAULTTONEAREST);
 		MONITORINFO mi = { sizeof(MONITORINFO) };
