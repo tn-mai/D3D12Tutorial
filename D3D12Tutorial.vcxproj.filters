@@ -36,10 +36,24 @@
     <FxCompile Include="Res\PixelShader.hlsl">
       <Filter>Res</Filter>
     </FxCompile>
+    <FxCompile Include="Res\FontPixelShader.hlsl">
+      <Filter>Res</Filter>
+    </FxCompile>
+    <FxCompile Include="Res\FontVertexShader.hlsl">
+      <Filter>Res</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <Image Include="Res\rock_s.png">
       <Filter>Res</Filter>
     </Image>
+    <Image Include="Res\ArialBlack.png">
+      <Filter>Res</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Res\ArialBlack.fnt">
+      <Filter>Res</Filter>
+    </None>
   </ItemGroup>
 </Project>

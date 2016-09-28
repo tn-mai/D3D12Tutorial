@@ -5,6 +5,8 @@
 #include "Texture.h"
 #include <wrl/client.h>
 #include <algorithm>
+#include <fstream>
+#include <string>
 
 using Microsoft::WRL::ComPtr;
 
@@ -90,17 +92,17 @@ UINT indexList[] = {
 * フォント描画用頂点データレイアウト.
 */
 D3D12_INPUT_ELEMENT_DESC fontVertexLayout[] = {
-	{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-	{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-	{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 28, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+	{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+	{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+	{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 };
 
 /**
 * フォント描画用頂点データ型.
 */
 struct FontVertex {
-	constexpr FontVertex(float x, float y, float z, float r, float g, float b, float a, float u, float v) : pos(x, y, z), col(r, g, b, a), texCoord(u, v) {}
-	DirectX::XMFLOAT3 pos;
+	constexpr FontVertex(float x, float y, float r, float g, float b, float a, float u, float v) : pos(x, y), col(r, g, b, a), texCoord(u, v) {}
+	DirectX::XMFLOAT2 pos;
 	DirectX::XMFLOAT4 col;
 	DirectX::XMFLOAT2 texCoord;
 };
@@ -226,6 +228,7 @@ struct Direct3DStuff {
 	UINT64 fenceValueForFrameBuffer[frameBufferCount];
 	int frameIndex;
 	int rtvDescriptorSize;
+	int srvDescriptorSize;
 
 	ComPtr<ID3D12PipelineState> pso;
 	ComPtr<ID3DBlob> signatureBlob;
@@ -253,6 +256,17 @@ struct Direct3DStuff {
 	DirectX::XMFLOAT4 cameraUp;
 
 	ObjectState objectState[objectCount];
+
+	static const size_t maxFontCharacters = 1024;
+	Font fontInfo;
+	ComPtr<ID3DBlob> fontVertexShaderBlob;
+	ComPtr<ID3DBlob> fontPixelShaderBlob;
+	ComPtr<ID3D12PipelineState> fontPSO;
+	ComPtr<ID3D12Resource> fontVertexBuffer[frameBufferCount];
+	D3D12_VERTEX_BUFFER_VIEW fontVertexBufferView[frameBufferCount];
+	ComPtr<ID3D12Resource> fontIndexBuffer;
+	D3D12_INDEX_BUFFER_VIEW fontIndexBufferView;
+	void* fontVertexBufferGPUAddress[frameBufferCount];
 };
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -261,6 +275,8 @@ void Finalize(Direct3DStuff&);
 void Update(Direct3DStuff&);
 void Render(Direct3DStuff&);
 void WaitForPreviousFrame(Direct3DStuff&);
+bool LoadFont(Font& font, const wchar_t* filename, float screenWidth, float screenHeight);
+void DrawFont(Direct3DStuff&, const std::wstring& text, DirectX::XMFLOAT2 pos, DirectX::XMFLOAT2 scale = { 1.0f, 1.0f }, DirectX::XMFLOAT4 col = { 1.0f, 1.0f, 1.0f, 1.0f });
 
 /**
 * アプリケーションのエントリポイント.
@@ -381,19 +397,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prevInstance, PWSTR cmdLine, i
 */
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	switch (msg) {
-	case WM_KEYDOWN:
-		if (wParam == VK_ESCAPE) {
-			if (MessageBox(nullptr, L"終了しますか？", L"終了", MB_YESNO | MB_ICONQUESTION) == IDYES) {
-				DestroyWindow(hwnd);
-			}
+switch (msg) {
+case WM_KEYDOWN:
+	if (wParam == VK_ESCAPE) {
+		if (MessageBox(nullptr, L"終了しますか？", L"終了", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+			DestroyWindow(hwnd);
 		}
-		return 0;
-	case WM_DESTROY:
-		PostQuitMessage(0);
-		return 0;
 	}
-	return DefWindowProc(hwnd, msg, wParam, lParam);
+	return 0;
+case WM_DESTROY:
+	PostQuitMessage(0);
+	return 0;
+}
+return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
 /**
@@ -474,6 +490,196 @@ bool UploadToGpuMemory(ComPtr<ID3D12Resource>& buffer, ComPtr<ID3D12Resource>& u
 	}
 	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(buffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, finishState));
 	return true;
+}
+
+std::wstring GetValue(std::wifstream& fs)
+{
+	std::wstring tmp;
+	std::getline(fs, tmp, L'=');
+	wchar_t c = fs.get();
+	if (c == L'"') {
+		std::getline(fs, tmp, L'"');
+	} else {
+		tmp.clear();
+		tmp.push_back(c);
+		while (fs) {
+			c = fs.get();
+			if (c == L' ' || c == L'\n') {
+				break;
+			}
+			tmp.push_back(c);
+		}
+	}
+	return tmp;
+}
+
+int GetValueI(std::wifstream& fs)
+{
+	std::wstring tmp = GetValue(fs);
+	return std::stoi(tmp);
+}
+float GetValueF(std::wifstream& fs)
+{
+	return static_cast<float>(GetValueI(fs));
+}
+
+/**
+* フォント定義ファイルを読み込む.
+*
+* @param font フォント定義オブジェクト.
+* @param filename フォント定義ファイル名.
+* @param screenWidth 表示スクリーンの横ピクセル数.
+* @param screenHeight 表示スクリーンの縦ピクセル数.
+*
+* @retval treu 読み込み成功.
+* @retval false 読み込み失敗.
+*/
+bool LoadFont(Font& font, const wchar_t* filename, float screenWidth, float screenHeight)
+{
+	std::wifstream fs;
+	fs.open(filename);
+
+	std::wstring tmp;
+
+	fs >> tmp;
+
+	font.name = GetValue(fs);
+	font.size = GetValueI(fs);
+
+	fs >> tmp >> tmp >> tmp >> tmp >> tmp >> tmp >> tmp;
+
+	tmp = GetValue(fs);
+	size_t startpos = tmp.find(L",") + 1;
+	font.topPadding = static_cast<float>(std::stoi(tmp.substr(0, startpos))) / screenHeight;
+	tmp = tmp.substr(startpos, tmp.size() - startpos);
+	startpos = tmp.find(L",") + 1;
+	font.rightPadding = static_cast<float>(std::stoi(tmp.substr(0, startpos))) / screenWidth;
+	tmp = tmp.substr(startpos, tmp.size() - startpos);
+	startpos = tmp.find(L",") + 1;
+	font.bottomPadding = static_cast<float>(std::stoi(tmp.substr(0, startpos))) / screenHeight;
+	font.leftPadding = static_cast<float>(std::stoi(tmp.substr(startpos, tmp.size() - startpos))) / screenWidth;
+
+	fs >> tmp >> tmp;
+
+	font.lineHeight = GetValueF(fs) / screenHeight;
+	font.baseHeight = GetValueF(fs) / screenHeight;
+	font.textureWidth = GetValueI(fs);
+	font.textureHeight = GetValueI(fs);
+
+	fs >> tmp >> tmp >> tmp >> tmp;
+
+	font.fontImage = GetValue(fs);
+
+	fs >> tmp;
+
+	const int numCharacters = GetValueI(fs);
+	font.charList.reserve(numCharacters);
+	for (int i = 0; i < numCharacters; ++i) {
+		FontChar c;
+		fs >> tmp;
+		c.id = GetValueI(fs);
+		c.uv.x = GetValueF(fs) / font.textureWidth;
+		c.uv.y = GetValueF(fs) / font.textureHeight;
+		const float w = GetValueF(fs);
+		c.ssize.x = w / screenWidth;
+		c.tsize.x = w / font.textureWidth;
+		const float h = GetValueF(fs);
+		c.ssize.y = h / screenWidth;
+		c.tsize.y = h / font.textureHeight;
+		c.offset.x = GetValueF(fs) / screenWidth;
+		c.offset.y = GetValueF(fs) / screenHeight;
+		c.xadvance = GetValueF(fs) / screenWidth;
+
+		fs >> tmp >> tmp;
+
+		font.charList.push_back(c);
+	}
+
+	fs >> tmp;
+
+	const int numKernings = GetValueI(fs);
+	font.kerningList.reserve(numKernings);
+	for (int i = 0; i < numKernings; ++i) {
+		FontKerning k;
+		fs >> tmp;
+		k.first = GetValueI(fs);
+		k.second = GetValueI(fs);
+		k.amount = GetValueF(fs) / screenWidth;
+		font.kerningList.push_back(k);
+	}
+
+	return true;
+}
+
+/**
+* フォントを描画.
+*
+* @param d3dStuff Direct3Dオブジェクト.
+* @param text 描画する文字列.
+* @param pos 描画位置のスクリーン座標.
+* @param scale 描画するフォントの大きさ.
+* @param  col 描画するフォントの色.
+*
+* @retval treu 読み込み成功.
+* @retval false 読み込み失敗.
+*/
+void DrawFont(Direct3DStuff& d3dStuff, const std::wstring& text, DirectX::XMFLOAT2 pos, DirectX::XMFLOAT2 scale, DirectX::XMFLOAT4 col)
+{
+	d3dStuff.commandList->SetPipelineState(d3dStuff.fontPSO.Get());
+	d3dStuff.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	d3dStuff.commandList->IASetVertexBuffers(0, 1, &d3dStuff.fontVertexBufferView[d3dStuff.frameIndex]);
+	d3dStuff.commandList->IASetIndexBuffer(&d3dStuff.fontIndexBufferView);
+	d3dStuff.commandList->SetGraphicsRootDescriptorTable(1, d3dStuff.fontInfo.srvHandle);
+
+	int numCharacters = 0;
+	DirectX::XMFLOAT2 topLeftScreenPos(pos.x * 2.0f - 1.0f, (1.0f - pos.y) * 2.0f - 1.0f);
+	DirectX::XMFLOAT2 curPos(topLeftScreenPos);
+	DirectX::XMFLOAT2 padding((d3dStuff.fontInfo.leftPadding + d3dStuff.fontInfo.rightPadding) * 0.5f, (d3dStuff.fontInfo.topPadding + d3dStuff.fontInfo.bottomPadding) * 0.0f);
+
+	FontVertex* v = static_cast<FontVertex*>(d3dStuff.fontVertexBufferGPUAddress[d3dStuff.frameIndex]);
+	wchar_t lastChar = -1;
+	for (int i = 0; i < text.size(); ++i) {
+		if (numCharacters >= d3dStuff.maxFontCharacters) {
+			break;
+		}
+		const wchar_t c = text[i];
+		const FontChar* fc = d3dStuff.fontInfo.GetChar(c);
+		if (!fc) {
+			continue;
+		}
+		float kerning = 0.0f;
+		if (i) {
+			kerning = d3dStuff.fontInfo.GetKerning(lastChar, c);
+		}
+		// 0-3
+		// |\|
+		// 2-1
+		v[0].pos.x = curPos.x + (fc->offset.x + kerning) * scale.x;
+		v[0].pos.y = curPos.y - fc->offset.y * scale.y;
+		v[0].texCoord = fc->uv;
+		v[0].col = col;
+		v[1].pos.x = curPos.x + (fc->offset.x + fc->ssize.x + kerning) * scale.x;
+		v[1].pos.y = curPos.y - (fc->offset.y + fc->ssize.y) * scale.y;
+		v[1].texCoord.x = fc->uv.x + fc->tsize.x;
+		v[1].texCoord.y = fc->uv.y + fc->tsize.y;
+		v[1].col = col;
+		v[2].pos.x = curPos.x + (fc->offset.x + kerning) * scale.x;
+		v[2].pos.y = curPos.y - (fc->offset.y + fc->ssize.y) * scale.y;
+		v[2].texCoord.x = fc->uv.x;
+		v[2].texCoord.y = fc->uv.y + fc->tsize.y;
+		v[2].col = col;
+		v[3].pos.x = curPos.x + (fc->offset.x + fc->ssize.x + kerning) * scale.x;
+		v[3].pos.y = curPos.y - fc->offset.y * scale.y;
+		v[3].texCoord.x = fc->uv.x + fc->tsize.x;
+		v[3].texCoord.y = fc->uv.y;
+		v[3].col = col;
+
+		v += 4;
+		curPos.x += (fc->xadvance - padding.x) * scale.x;
+		++numCharacters;
+		lastChar = c;
+	}
+	d3dStuff.commandList->DrawIndexedInstanced(numCharacters * 6, 1, 0, 0, 0);
 }
 
 /**
@@ -794,7 +1000,7 @@ bool Init3D(Direct3DStuff& d3dStuff)
 
 	D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
 	cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	cbvHeapDesc.NumDescriptors = 1;
+	cbvHeapDesc.NumDescriptors = 2;
 	cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	hr = d3dStuff.device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(d3dStuff.srvDescriptorHeap.GetAddressOf()));
 	if (FAILED(hr)) {
@@ -806,6 +1012,111 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 	srvDesc.Texture2D.MipLevels = 1;
 	d3dStuff.device->CreateShaderResourceView(d3dStuff.textureBuffer.Get(), &srvDesc, d3dStuff.srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
+	// フォント描画用PSOを作成.
+	if (!LoadShader(L"Res/FontVertexShader.hlsl", "vs_5_0", d3dStuff.fontVertexShaderBlob)) {
+		return false;
+	}
+	if (!LoadShader(L"Res/FontPixelShader.hlsl", "ps_5_0", d3dStuff.fontPixelShaderBlob)) {
+		return false;
+	}
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC fontPsoDesc = {};
+	fontPsoDesc.pRootSignature = d3dStuff.rootSignature.Get();
+	fontPsoDesc.VS.pShaderBytecode = d3dStuff.fontVertexShaderBlob->GetBufferPointer();
+	fontPsoDesc.VS.BytecodeLength = d3dStuff.fontVertexShaderBlob->GetBufferSize();
+	fontPsoDesc.PS.pShaderBytecode = d3dStuff.fontPixelShaderBlob->GetBufferPointer();
+	fontPsoDesc.PS.BytecodeLength = d3dStuff.fontPixelShaderBlob->GetBufferSize();
+	fontPsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	fontPsoDesc.SampleMask = 0xffffffff;
+	fontPsoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	fontPsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	fontPsoDesc.DepthStencilState.DepthEnable = FALSE;
+	fontPsoDesc.InputLayout.pInputElementDescs = fontVertexLayout;
+	fontPsoDesc.InputLayout.NumElements = _countof(fontVertexLayout);
+	fontPsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	fontPsoDesc.NumRenderTargets = 1;
+	fontPsoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	fontPsoDesc.SampleDesc.Count = 1;
+	fontPsoDesc.BlendState.AlphaToCoverageEnable = FALSE;
+	fontPsoDesc.BlendState.IndependentBlendEnable = FALSE;
+	fontPsoDesc.BlendState.RenderTarget[0].BlendEnable = TRUE;
+	fontPsoDesc.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+	fontPsoDesc.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+	fontPsoDesc.BlendState.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+	fontPsoDesc.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_SRC_ALPHA;
+	fontPsoDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+	fontPsoDesc.BlendState.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+	fontPsoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+	hr = d3dStuff.device->CreateGraphicsPipelineState(&fontPsoDesc, IID_PPV_ARGS(d3dStuff.fontPSO.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+
+	// フォントを読み込む.
+	if (!LoadFont(d3dStuff.fontInfo, L"Res/ArialBlack.fnt", static_cast<float>(d3dStuff.width), static_cast<float>(d3dStuff.height))) {
+		return false;
+	}
+	D3D12_RESOURCE_DESC fontTextureDesc;
+	int fontImageBytesPerRow;
+	std::vector<uint8_t> fontImageData;
+	if (!textureLoader.LoadFromFile((std::wstring(L"Res/") + d3dStuff.fontInfo.fontImage).c_str(), fontImageData, fontTextureDesc, fontImageBytesPerRow)) {
+		return false;
+	}
+	UINT64 fontTextureHeapSize;
+	d3dStuff.device->GetCopyableFootprints(&fontTextureDesc, 0, 1, 0, nullptr, nullptr, nullptr, &fontTextureHeapSize);
+	ComPtr<ID3D12Resource> fontTextureUploadHeap;
+	if (!UploadToGpuMemory(d3dStuff.fontInfo.textureBuffer, fontTextureUploadHeap, d3dStuff, &fontTextureDesc, fontImageData.data(), fontTextureHeapSize, fontImageBytesPerRow, fontImageBytesPerRow * fontTextureDesc.Height, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, L"Font Textre Buffer")) {
+		return false;
+	}
+	D3D12_SHADER_RESOURCE_VIEW_DESC fontSrvDesc = {};
+	fontSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	fontSrvDesc.Format = fontTextureDesc.Format;
+	fontSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	fontSrvDesc.Texture2D.MipLevels = 1;
+	d3dStuff.srvDescriptorSize = d3dStuff.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	d3dStuff.fontInfo.srvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(d3dStuff.srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart(), 1, d3dStuff.srvDescriptorSize);
+	CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(d3dStuff.srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), 1, d3dStuff.srvDescriptorSize);
+	d3dStuff.device->CreateShaderResourceView(d3dStuff.fontInfo.textureBuffer.Get(), &fontSrvDesc, srvHandle);
+	for (int i = 0; i < d3dStuff.frameBufferCount; ++i) {
+		hr = d3dStuff.device->CreateCommittedResource(
+			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+			D3D12_HEAP_FLAG_NONE,
+			&CD3DX12_RESOURCE_DESC::Buffer(d3dStuff.maxFontCharacters * sizeof(FontVertex)),
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(d3dStuff.fontVertexBuffer[i].GetAddressOf())
+		);
+		if (FAILED(hr)) {
+			return false;
+		}
+		d3dStuff.fontVertexBuffer[i]->SetName(L"Font Vertex Buffer");
+		CD3DX12_RANGE range(0, 0);
+		hr = d3dStuff.fontVertexBuffer[i]->Map(0, &range, &d3dStuff.fontVertexBufferGPUAddress[i]);
+		if (FAILED(hr)) {
+			return false;
+		}
+		d3dStuff.fontVertexBufferView[i].BufferLocation = d3dStuff.fontVertexBuffer[i]->GetGPUVirtualAddress();
+		d3dStuff.fontVertexBufferView[i].StrideInBytes = sizeof(FontVertex);
+		d3dStuff.fontVertexBufferView[i].SizeInBytes = d3dStuff.maxFontCharacters * sizeof(FontVertex);
+	}
+	ComPtr<ID3D12Resource> fontIBUploadHeap;
+	std::vector<DWORD> fontIndexList;
+	fontIndexList.resize(d3dStuff.maxFontCharacters * 6);
+	for (int i = 0; i < d3dStuff.maxFontCharacters; ++i) {
+		fontIndexList[i * 6 + 0] = i * 4 + 0;
+		fontIndexList[i * 6 + 1] = i * 4 + 1;
+		fontIndexList[i * 6 + 2] = i * 4 + 2;
+		fontIndexList[i * 6 + 3] = i * 4 + 0;
+		fontIndexList[i * 6 + 4] = i * 4 + 3;
+		fontIndexList[i * 6 + 5] = i * 4 + 1;
+	}
+	const size_t fontIndexListSize = d3dStuff.maxFontCharacters * 6 * sizeof(DWORD);
+	if (!UploadToGpuMemory(d3dStuff.fontIndexBuffer, fontIBUploadHeap, d3dStuff, &CD3DX12_RESOURCE_DESC::Buffer(fontIndexListSize), fontIndexList.data(), fontIndexListSize, fontIndexListSize, fontIndexListSize, D3D12_RESOURCE_STATE_INDEX_BUFFER, L"Font Index Buffer")) {
+		return false;
+	}
+	d3dStuff.fontIndexBufferView.BufferLocation = d3dStuff.fontIndexBuffer->GetGPUVirtualAddress();
+	d3dStuff.fontIndexBufferView.SizeInBytes = fontIndexListSize;
+	d3dStuff.fontIndexBufferView.Format = DXGI_FORMAT_R32_UINT;
 
 	// ここまでに積まれたコマンドを実行.
 	hr = d3dStuff.commandList->Close();
@@ -978,8 +1289,10 @@ void Render(Direct3DStuff& d3dStuff)
 		d3dStuff.commandList->DrawIndexedInstanced(_countof(indexList), 1, 0, 0, 0);
 		gpuAddress += AlignedConstantBufferSize;
 	}
-	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 
+	DrawFont(d3dStuff, L"FontTest", DirectX::XMFLOAT2(0.02f, 0.01f), DirectX::XMFLOAT2(2.0f, 2.0f));
+
+	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 	hr = d3dStuff.commandList->Close();
 	if (FAILED(hr)) {
 		d3dStuff.running = false;
