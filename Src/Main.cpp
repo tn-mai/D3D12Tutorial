@@ -132,6 +132,8 @@ struct Direct3DStuff {
 	ComPtr<ID3D12DescriptorHeap> srvDescriptorHeap;
 	ComPtr<ID3D12Resource> cbvUploadHeapList[frameBufferCount];
 	void* cbvHeapBegin[frameBufferCount];
+	ComPtr<ID3D12GraphicsCommandList> prologueCommandList;
+	ComPtr<ID3D12GraphicsCommandList> epilogueCommandList;
 	ComPtr<ID3D12CommandAllocator> commandAllocator[frameBufferCount];
 	ComPtr<ID3D12GraphicsCommandList> commandList;
 	ComPtr<ID3D12Fence> fence;
@@ -565,6 +567,22 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	// バックバッファ毎に持つ必要がないため1つだけ作ればよい.
 	// そのかわり、描画したいバックバッファが変わる毎に、対応するコマンドアロケータを設定し直す必要がある.
 	// 生成された直後のコマンドリストはリセットが呼び出された直後と同じ状態になっているため、すぐにコマンドを送り込むことが出来る.
+	hr = d3dStuff.device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, d3dStuff.commandAllocator[0].Get(), nullptr, IID_PPV_ARGS(d3dStuff.prologueCommandList.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+	hr = d3dStuff.prologueCommandList->Close();
+	if (FAILED(hr)) {
+		d3dStuff.running = false;
+	}
+	hr = d3dStuff.device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, d3dStuff.commandAllocator[0].Get(), nullptr, IID_PPV_ARGS(d3dStuff.epilogueCommandList.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+	hr = d3dStuff.epilogueCommandList->Close();
+	if (FAILED(hr)) {
+		d3dStuff.running = false;
+	}
 	hr = d3dStuff.device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, d3dStuff.commandAllocator[0].Get(), nullptr, IID_PPV_ARGS(d3dStuff.commandList.GetAddressOf()));
 	if (FAILED(hr)) {
 		return false;
@@ -896,13 +914,33 @@ void Render(Direct3DStuff& d3dStuff)
 	if (FAILED(hr)) {
 		d3dStuff.running = false;
 	}
+
+	hr = d3dStuff.prologueCommandList->Reset(d3dStuff.commandAllocator[d3dStuff.frameIndex].Get(), d3dStuff.pso.Get());
+	if (FAILED(hr)) {
+		d3dStuff.running = false;
+	}
+	d3dStuff.prologueCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+	hr = d3dStuff.prologueCommandList->Close();
+	if (FAILED(hr)) {
+		d3dStuff.running = false;
+	}
+
+	hr = d3dStuff.epilogueCommandList->Reset(d3dStuff.commandAllocator[d3dStuff.frameIndex].Get(), d3dStuff.pso.Get());
+	if (FAILED(hr)) {
+		d3dStuff.running = false;
+	}
+	d3dStuff.epilogueCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+	hr = d3dStuff.epilogueCommandList->Close();
+	if (FAILED(hr)) {
+		d3dStuff.running = false;
+	}
+
 	hr = d3dStuff.commandList->Reset(d3dStuff.commandAllocator[d3dStuff.frameIndex].Get(), d3dStuff.pso.Get());
 	if (FAILED(hr)) {
 		d3dStuff.running = false;
 	}
 
 	// コマンドを積んでいく.
-	d3dStuff.commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
 	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = d3dStuff.rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 	rtvHandle.ptr += d3dStuff.frameIndex * d3dStuff.rtvDescriptorSize;
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = d3dStuff.dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
@@ -929,8 +967,6 @@ void Render(Direct3DStuff& d3dStuff)
 		gpuAddress += AlignedConstantBufferSize;
 	}
 
-	const CD3DX12_RESOURCE_BARRIER resourceBarrierEnd = CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-	d3dStuff.commandList->ResourceBarrier(1, &resourceBarrierEnd);
 	hr = d3dStuff.commandList->Close();
 	if (FAILED(hr)) {
 		d3dStuff.running = false;
@@ -945,7 +981,7 @@ void Render(Direct3DStuff& d3dStuff)
 	}
 
 	// 描画開始.
-	ID3D12CommandList* commandListArray[] = { d3dStuff.commandList.Get(), d3dStuff.fontRenderer.GetCommandList()};
+	ID3D12CommandList* commandListArray[] = { d3dStuff.prologueCommandList.Get(), d3dStuff.commandList.Get(), d3dStuff.fontRenderer.GetCommandList(), d3dStuff.epilogueCommandList.Get() };
 	d3dStuff.commandQueue->ExecuteCommandLists(_countof(commandListArray), commandListArray);
 	hr = d3dStuff.swapChain->Present(1, 0);
 	if (FAILED(hr)) {
