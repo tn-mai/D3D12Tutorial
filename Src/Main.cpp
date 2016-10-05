@@ -4,11 +4,16 @@
 #include "stdafx.h"
 #include "Texture.h"
 #include "Font.h"
+#include "Sprite.h"
+#include "Engine.h"
 #include <algorithm>
 #include <fstream>
 #include <string>
 
 using Microsoft::WRL::ComPtr;
+
+/// テクスチャ名.
+const wchar_t textureName[] = L"Res/rock_s.png";
 
 /**
 * Vertex構造体のレイアウト.
@@ -122,6 +127,8 @@ struct Direct3DStuff {
 	bool initialized;
 	HWND hwnd;
 
+	Engine engine;
+
 	ComPtr<ID3D12Device> device;
 	ComPtr<IDXGISwapChain3> swapChain;
 	ComPtr<ID3D12CommandQueue> commandQueue;
@@ -129,7 +136,6 @@ struct Direct3DStuff {
 	ComPtr<ID3D12Resource> renderTargetList[frameBufferCount];
 	ComPtr<ID3D12DescriptorHeap> dsvDescriptorHeap;
 	ComPtr<ID3D12Resource> depthStencilbuffer;
-	ComPtr<ID3D12DescriptorHeap> srvDescriptorHeap;
 	ComPtr<ID3D12Resource> cbvUploadHeapList[frameBufferCount];
 	void* cbvHeapBegin[frameBufferCount];
 	ComPtr<ID3D12GraphicsCommandList> prologueCommandList;
@@ -142,7 +148,6 @@ struct Direct3DStuff {
 	UINT64 fenceValueForFrameBuffer[frameBufferCount];
 	int frameIndex;
 	int rtvDescriptorSize;
-	int srvDescriptorSize;
 
 	ComPtr<ID3D12PipelineState> pso;
 	ComPtr<ID3DBlob> signatureBlob;
@@ -158,9 +163,6 @@ struct Direct3DStuff {
 	ComPtr<ID3DBlob> vertexShaderBlob;
 	ComPtr<ID3DBlob> pixelShaderBlob;
 
-	ComPtr<ID3D12Resource> textureBuffer;
-	ComPtr<ID3D12Resource> textureBufferUploadHeap;
-
 	ConstantBuffer cbPerObject;
 
 	DirectX::XMFLOAT4X4 matProjection;
@@ -173,6 +175,7 @@ struct Direct3DStuff {
 
 	Font fontInfo;
 	FontRenderer fontRenderer;
+	SpriteRenderer spriteRenderer;
 };
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -406,74 +409,13 @@ bool Init3D(Direct3DStuff& d3dStuff)
 {
 	HRESULT hr;
 
-#if !defined(NDEBUG)
-	// Enable the D3D12 debug layer.
-	{
-		ComPtr<ID3D12Debug> debugController;
-		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
-			debugController->EnableDebugLayer();
-		}
-	}
-#endif
-	IDXGIFactory4* dxgiFactory;
-	hr = CreateDXGIFactory1(IID_PPV_ARGS(&dxgiFactory));
-	if (FAILED(hr)) {
+	if (!d3dStuff.engine.Initialize(d3dStuff.hwnd, d3dStuff.width, d3dStuff.height)) {
 		return false;
 	}
-
-	// 機能レベル11を満たすハードウェアアダプタを検索し、そのデバイスインターフェイスを取得する.
-	IDXGIAdapter1* dxgiAdapter;
-	int adapterIndex = 0;
-	bool adapterFound = false;
-	while (dxgiFactory->EnumAdapters1(adapterIndex, &dxgiAdapter) != DXGI_ERROR_NOT_FOUND) {
-		DXGI_ADAPTER_DESC1 desc;
-		dxgiAdapter->GetDesc1(&desc);
-		if (!(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) {
-			hr = D3D12CreateDevice(dxgiAdapter, D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr);
-			if (SUCCEEDED(hr)) {
-				adapterFound = true;
-				break;
-			}
-		}
-		++adapterIndex;
-	}
-	if (!adapterFound) {
-		// 機能レベル11を満たすハードウェアが見つからない場合、WARPデバイスの作成を試みる.
-		hr = dxgiFactory->EnumWarpAdapter(IID_PPV_ARGS(&dxgiAdapter));
-		if (FAILED(hr)) {
-			return false;
-		}
-		d3dStuff.warp = true;
-	}
-	hr = D3D12CreateDevice(dxgiAdapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(d3dStuff.device.GetAddressOf()));
-	if (FAILED(hr)) {
-		return false;
-	}
-
-	// コマンドキューを作成.
-	// 通常、コマンドキューはデバイスごとに1つだけ作成する.
-	D3D12_COMMAND_QUEUE_DESC cqDesc = {};
-	hr = d3dStuff.device->CreateCommandQueue(&cqDesc, IID_PPV_ARGS(d3dStuff.commandQueue.GetAddressOf()));
-	if (FAILED(hr)) {
-		return false;
-	}
-
-	// スワップチェーンを作成.
-	DXGI_SWAP_CHAIN_DESC1 scDesc = {};
-	scDesc.Width = d3dStuff.width;
-	scDesc.Height = d3dStuff.height;
-	scDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	scDesc.SampleDesc.Count = 1;
-	scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	scDesc.BufferCount = d3dStuff.frameBufferCount;
-	scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-
-	ComPtr<IDXGISwapChain1> tmpSwapChain;
-	hr = dxgiFactory->CreateSwapChainForHwnd(d3dStuff.commandQueue.Get(), d3dStuff.hwnd, &scDesc, nullptr, nullptr, tmpSwapChain.GetAddressOf());
-	if (FAILED(hr)) {
-		return false;
-	}
-	tmpSwapChain.As(&d3dStuff.swapChain);
+	d3dStuff.device = d3dStuff.engine.GetDevice();
+	d3dStuff.commandQueue = d3dStuff.engine.GetCommandQueue();
+	d3dStuff.swapChain = d3dStuff.engine.GetSwapChain();
+	d3dStuff.warp = d3dStuff.engine.IsWarpDevice();
 	d3dStuff.frameIndex = d3dStuff.swapChain->GetCurrentBackBufferIndex();
 
 	// RTV用のデスクリプタヒープ及びデスクリプタを作成.
@@ -714,39 +656,15 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	d3dStuff.indexBufferView.Format = DXGI_FORMAT_R32_UINT;
 
 	// テクスチャを読み込む.
-	Texture::Loader textureLoader;
-	D3D12_RESOURCE_DESC textureDesc;
-	int imageBytesPerRow;
-	std::vector<uint8_t> imageData;
-	if (!textureLoader.LoadFromFile(L"Res/rock_s.png", imageData, textureDesc, imageBytesPerRow)) {
+	if (!d3dStuff.engine.LoadTexture(textureName)) {
 		return false;
 	}
-	UINT64 textureHeapSize;
-	d3dStuff.device->GetCopyableFootprints(&textureDesc, 0, 1, 0, nullptr, nullptr, nullptr, &textureHeapSize);
-	ComPtr<ID3D12Resource> textureUploadHeap;
-	if (!UploadToGpuMemory(d3dStuff.textureBuffer, textureUploadHeap, d3dStuff.device, d3dStuff.commandList, &textureDesc, imageData.data(), textureHeapSize, imageBytesPerRow, imageBytesPerRow * textureDesc.Height, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, L"Textre Buffer")) {
-		return false;
-	}
-
-	D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
-	cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	cbvHeapDesc.NumDescriptors = 2;
-	cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	hr = d3dStuff.device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(d3dStuff.srvDescriptorHeap.GetAddressOf()));
-	if (FAILED(hr)) {
-		return false;
-	}
-	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	srvDesc.Format = textureDesc.Format;
-	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-	srvDesc.Texture2D.MipLevels = 1;
-	d3dStuff.device->CreateShaderResourceView(d3dStuff.textureBuffer.Get(), &srvDesc, d3dStuff.srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
 	// フォントを読み込む.
 	if (!LoadFont(d3dStuff.fontInfo, L"Res/ArialBlack.fnt", static_cast<float>(d3dStuff.width), static_cast<float>(d3dStuff.height))) {
 		return false;
 	}
+	Texture::Loader textureLoader;
 	D3D12_RESOURCE_DESC fontTextureDesc;
 	int fontImageBytesPerRow;
 	std::vector<uint8_t> fontImageData;
@@ -759,15 +677,7 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	if (!UploadToGpuMemory(d3dStuff.fontInfo.textureBuffer, fontTextureUploadHeap, d3dStuff.device, d3dStuff.commandList, &fontTextureDesc, fontImageData.data(), fontTextureHeapSize, fontImageBytesPerRow, fontImageBytesPerRow * fontTextureDesc.Height, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, L"Font Textre Buffer")) {
 		return false;
 	}
-	D3D12_SHADER_RESOURCE_VIEW_DESC fontSrvDesc = {};
-	fontSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	fontSrvDesc.Format = fontTextureDesc.Format;
-	fontSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-	fontSrvDesc.Texture2D.MipLevels = 1;
-	d3dStuff.srvDescriptorSize = d3dStuff.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	d3dStuff.fontInfo.srvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(d3dStuff.srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart(), 1, d3dStuff.srvDescriptorSize);
-	CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(d3dStuff.srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), 1, d3dStuff.srvDescriptorSize);
-	d3dStuff.device->CreateShaderResourceView(d3dStuff.fontInfo.textureBuffer.Get(), &fontSrvDesc, srvHandle);
+	d3dStuff.fontInfo.srvHandle = d3dStuff.engine.CreateSRVHandle(d3dStuff.fontInfo.textureBuffer, fontTextureDesc.Format);
 
 	// ここまでに積まれたコマンドを実行.
 	hr = d3dStuff.commandList->Close();
@@ -780,7 +690,11 @@ bool Init3D(Direct3DStuff& d3dStuff)
 		return false;
 	}
 
-	ID3D12CommandList* commandListArray[] = { d3dStuff.commandList.Get(), d3dStuff.fontRenderer.GetCommandList() };
+	if (!d3dStuff.spriteRenderer.Init(d3dStuff.device, uploadBufferList, d3dStuff.frameBufferCount, 1024)) {
+		return false;
+	}
+
+	ID3D12CommandList* commandListArray[] = { d3dStuff.commandList.Get(), d3dStuff.fontRenderer.GetCommandList(), d3dStuff.spriteRenderer.GetCommandList(), d3dStuff.engine.GetTextureCommandList() };
 	d3dStuff.commandQueue->ExecuteCommandLists(_countof(commandListArray), commandListArray);
 	hr = d3dStuff.commandQueue->Signal(d3dStuff.fence.Get(), d3dStuff.masterFenceValue);
 	if (FAILED(hr)) {
@@ -953,9 +867,9 @@ void Render(Direct3DStuff& d3dStuff)
 
 	// 頂点を描画.
 	d3dStuff.commandList->SetGraphicsRootSignature(d3dStuff.rootSignature.Get());
-	ID3D12DescriptorHeap* heapList[] = { d3dStuff.srvDescriptorHeap.Get() };
+	ID3D12DescriptorHeap* heapList[] = { d3dStuff.engine.GetDescriptorHeap() };
 	d3dStuff.commandList->SetDescriptorHeaps(_countof(heapList), heapList);
-	d3dStuff.commandList->SetGraphicsRootDescriptorTable(1, d3dStuff.srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+	d3dStuff.commandList->SetGraphicsRootDescriptorTable(1, d3dStuff.engine.GetTextureHandle(textureName));
 	d3dStuff.commandList->RSSetViewports(1, &d3dStuff.viewport);
 	d3dStuff.commandList->RSSetScissorRects(1, &d3dStuff.scissorRect);
 	d3dStuff.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);

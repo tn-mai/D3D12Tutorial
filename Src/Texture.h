@@ -9,6 +9,8 @@
 #include <vector>
 #include <map>
 
+class DescriptorHeapManager;
+
 /**
 * テクスチャ関連の機能や値を格納する名前空間.
 */
@@ -42,26 +44,26 @@ namespace Texture {
 		static const size_t maxTextureCount = 10;
 
 		Manager();
-		bool Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device);
+		bool Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device, DescriptorHeapManager* heap);
 		bool LoadFromFile(Microsoft::WRL::ComPtr<ID3D12Device> device, const wchar_t* filename);
 		void Unload(const wchar_t* filename);
-		const ID3D12CommandList* GetCommandList() const;
+		ID3D12GraphicsCommandList* GetCommandList();
 		void ClearUploadBuffer();
 		D3D12_GPU_DESCRIPTOR_HANDLE GetTextureHandle(const wchar_t* filename) const;
+		DXGI_FORMAT GetTextureFormat(const wchar_t* filename) const;
 
 	private:
 		struct TextureInfo {
 			ResourcePtr buffer;
+			DXGI_FORMAT format;
 			D3D12_GPU_DESCRIPTOR_HANDLE srvHandle;
 		};
 		std::map<std::wstring, TextureInfo> textureList;
-		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvDescriptorHeap;
-		std::vector<int> freeDescriptorList;
-		int srvDescriptorSize;
 		Loader loader;
 		std::vector<ResourcePtr> uploadBufferList;
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocator;
 		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commandList;
+		DescriptorHeapManager* descriptorHeap;
 	};
 
 } // namespace Texture

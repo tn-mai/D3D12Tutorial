@@ -3,6 +3,7 @@
 */
 #include "Texture.h"
 #include "d3dx12.h"
+#include "Engine.h"
 #include <exception>
 
 using Microsoft::WRL::ComPtr;
@@ -260,11 +261,9 @@ namespace Texture {
 	/**
 	* テクスチャマネージャを初期化する.
 	*/
-	bool Manager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device)
+	bool Manager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device, DescriptorHeapManager* heap)
 	{
 		HRESULT hr;
-		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvDescriptorHeap;
-		int srvDescriptorSize;
 
 		hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(commandAllocator.GetAddressOf()));
 		if (FAILED(hr)) {
@@ -274,24 +273,15 @@ namespace Texture {
 		if (FAILED(hr)) {
 			return false;
 		}
-		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-		srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-		srvHeapDesc.NumDescriptors = maxTextureCount;
-		srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-		hr = device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(srvDescriptorHeap.GetAddressOf()));
-		if (FAILED(hr)) {
-			return false;
-		}
-		srvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-		for (int i = maxTextureCount - 1; i >= 0; --i) {
-			freeDescriptorList.push_back(i);
-		}
+
+		descriptorHeap = heap;
+
 		return true;
 	}
 
 	bool Manager::LoadFromFile(Microsoft::WRL::ComPtr<ID3D12Device> device, const wchar_t* filename)
 	{
-		if (freeDescriptorList.empty()) {
+		if (descriptorHeap->Empty()) {
 			return false;
 		}
 
@@ -312,18 +302,8 @@ namespace Texture {
 		}
 		uploadBufferList.push_back(uploadBuffer);
 
-		const int descriptorIndex = freeDescriptorList.back();
-		freeDescriptorList.pop_back();
-
-		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-		srvDesc.Format = textureDesc.Format;
-		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-		srvDesc.Texture2D.MipLevels = 1;
-		device->CreateShaderResourceView(textureInfo.buffer.Get(), &srvDesc, CD3DX12_CPU_DESCRIPTOR_HANDLE(srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), descriptorIndex, srvDescriptorSize));
-
-		textureInfo.srvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart(), descriptorIndex, srvDescriptorSize);
-
+		textureInfo.srvHandle = descriptorHeap->GetFreeSRVHandle(textureInfo.buffer, textureDesc.Format);
+		textureInfo.format = textureDesc.Format;
 		textureList.insert({filename, textureInfo});
 
 		return true;
@@ -335,13 +315,13 @@ namespace Texture {
 		if (itr == textureList.end()) {
 			return;
 		}
-		const int descriptorIndex  = static_cast<int>(itr->second.srvHandle.ptr - srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr) / srvDescriptorSize;
-		freeDescriptorList.push_back(descriptorIndex);
+		descriptorHeap->ReleaseHandle(itr->second.srvHandle);
 		textureList.erase(itr);
 	}
 
-	const ID3D12CommandList* Manager::GetCommandList() const
+	ID3D12GraphicsCommandList* Manager::GetCommandList()
 	{
+		commandList->Close();
 		return commandList.Get();
 	}
 
@@ -354,4 +334,10 @@ namespace Texture {
 	{
 		return textureList.find(filename)->second.srvHandle;
 	}
+
+	DXGI_FORMAT Manager::GetTextureFormat(const wchar_t* filename) const
+	{
+		return textureList.find(filename)->second.format;
+	}
+
 } // namespace Texture
