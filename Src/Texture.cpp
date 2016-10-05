@@ -2,9 +2,12 @@
 * @file Texture.cpp
 */
 #include "Texture.h"
+#include "d3dx12.h"
 #include <exception>
 
 using Microsoft::WRL::ComPtr;
+
+bool UploadToGpuMemory(ComPtr<ID3D12Resource>& buffer, ComPtr<ID3D12Resource>& uploadBuffer, ComPtr<ID3D12Device>& device, ComPtr<ID3D12GraphicsCommandList>& commandList, const D3D12_RESOURCE_DESC* desc, const void* data, size_t dataSize, int rowPitch, int slicePitch, D3D12_RESOURCE_STATES finishState, const wchar_t* bufferName = nullptr);
 
 namespace Texture {
 
@@ -241,5 +244,103 @@ namespace Texture {
 		desc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
 		return true;
+	}
+
+	/**
+	* テクスチャマネージャを初期化する.
+	*/
+	bool Manager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device)
+	{
+		HRESULT hr;
+		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvDescriptorHeap;
+		int srvDescriptorSize;
+
+		hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(commandAllocator.GetAddressOf()));
+		if (FAILED(hr)) {
+			return false;
+		}
+		hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(commandList.GetAddressOf()));
+		if (FAILED(hr)) {
+			return false;
+		}
+		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+		srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		srvHeapDesc.NumDescriptors = maxTextureCount;
+		srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		hr = device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(srvDescriptorHeap.GetAddressOf()));
+		if (FAILED(hr)) {
+			return false;
+		}
+		srvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		for (int i = maxTextureCount - 1; i >= 0; --i) {
+			freeDescriptorList.push_back(i);
+		}
+		return true;
+	}
+
+	bool Manager::LoadFromFile(Microsoft::WRL::ComPtr<ID3D12Device> device, const wchar_t* filename)
+	{
+		if (freeDescriptorList.empty()) {
+			return false;
+		}
+
+		D3D12_RESOURCE_DESC textureDesc;
+		int imageBytesPerRow;
+		std::vector<uint8_t> imageData;
+		if (!loader.LoadFromFile(filename, imageData, textureDesc, imageBytesPerRow)) {
+			return false;
+		}
+
+		UINT64 textureHeapSize;
+		device->GetCopyableFootprints(&textureDesc, 0, 1, 0, nullptr, nullptr, nullptr, &textureHeapSize);
+
+		TextureInfo textureInfo;
+		ResourcePtr uploadBuffer;
+		if (!UploadToGpuMemory(textureInfo.buffer, uploadBuffer, device, commandList, &textureDesc, imageData.data(), textureHeapSize, imageBytesPerRow, imageBytesPerRow * textureDesc.Height, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, L"Textre Buffer")) {
+			return false;
+		}
+		uploadBufferList.push_back(uploadBuffer);
+
+		const int descriptorIndex = freeDescriptorList.back();
+		freeDescriptorList.pop_back();
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.Format = textureDesc.Format;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
+		device->CreateShaderResourceView(textureInfo.buffer.Get(), &srvDesc, CD3DX12_CPU_DESCRIPTOR_HANDLE(srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), descriptorIndex, srvDescriptorSize));
+
+		textureInfo.srvHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart(), descriptorIndex, srvDescriptorSize);
+
+		textureList.insert({filename, textureInfo});
+
+		return true;
+	}
+
+	void Manager::Unload(const wchar_t* filename)
+	{
+		auto itr = textureList.find(filename);
+		if (itr == textureList.end()) {
+			return;
+		}
+		const int descriptorIndex  = static_cast<int>(itr->second.srvHandle.ptr - srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr) / srvDescriptorSize;
+		freeDescriptorList.push_back(descriptorIndex);
+		textureList.erase(itr);
+	}
+
+	const ID3D12CommandList* Manager::GetCommandList() const
+	{
+		return commandList.Get();
+	}
+
+	void Manager::ClearUploadBuffer()
+	{
+		uploadBufferList.clear();
+	}
+
+	D3D12_GPU_DESCRIPTOR_HANDLE Manager::GetTextureHandle(const wchar_t* filename) const
+	{
+		return textureList.find(filename)->second.srvHandle;
 	}
 } // namespace Texture
