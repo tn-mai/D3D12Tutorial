@@ -24,13 +24,12 @@ namespace Texture {
 	class Loader
 	{
 	public:
-		Loader();
-		~Loader() {}
-
+		static void Initialize();
+		static void Destroy();
 		bool LoadFromFile(const wchar_t* filename, std::vector<uint8_t>& imageData, D3D12_RESOURCE_DESC& desc, int& bytesPerRow);
 
 	private:
-		Microsoft::WRL::ComPtr<IWICImagingFactory> factory;
+		static Microsoft::WRL::ComPtr<IWICImagingFactory> factory;
 	};
 
 	/**

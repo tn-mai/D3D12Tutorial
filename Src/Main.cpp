@@ -856,6 +856,7 @@ bool Init3D(Direct3DStuff& d3dStuff)
 bool Initialize(Direct3DStuff& d3dStuff)
 {
 	CoInitialize(nullptr);
+	Texture::Loader::Initialize();
 	if (!Init3D(d3dStuff)) {
 		return false;
 	}
@@ -882,6 +883,7 @@ void Finalize(Direct3DStuff& d3dStuff)
 	if (d3dStuff.fenceEvent) {
 		CloseHandle(d3dStuff.fenceEvent);
 	}
+	Texture::Loader::Destroy();
 	CoUninitialize();
 }
 

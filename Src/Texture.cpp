@@ -145,17 +145,24 @@ namespace Texture {
 		}
 	} // unnamed namespace
 
+	Microsoft::WRL::ComPtr<IWICImagingFactory> Loader::factory;
+
 	/**
 	* テクスチャローダーを初期化する.
 	*
 	* 初期化に失敗した場合、std::exceptionを送出する.
 	*/
-	Loader::Loader()
+	void Loader::Initialize()
 	{
 		HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(factory.GetAddressOf()));
 		if (FAILED(hr)) {
 			throw std::exception("WICImagingFactory cannot create");
 		}
+	}
+
+	void Loader::Destroy()
+	{
+		factory.Reset();
 	}
 
 	/**
@@ -244,6 +251,10 @@ namespace Texture {
 		desc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
 		return true;
+	}
+
+	Manager::Manager()
+	{
 	}
 
 	/**
