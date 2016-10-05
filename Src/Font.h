@@ -8,6 +8,7 @@
 #include <vector>
 
 struct Direct3DStuff;
+class ResourceLoader;
 
 /**
 * フォントキャラクタデータ型.
@@ -56,13 +57,11 @@ struct Font
 	const FontChar* GetChar(wchar_t c) const;
 };
 
-typedef std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> UploadBufferList;
-
 class FontRenderer
 {
 public:
 	FontRenderer();
-	bool Init(Microsoft::WRL::ComPtr<ID3D12Device>, UploadBufferList&);
+	bool Init(Microsoft::WRL::ComPtr<ID3D12Device>, ResourceLoader&);
 	bool Begin(const Font*, int, const D3D12_CPU_DESCRIPTOR_HANDLE*, const D3D12_CPU_DESCRIPTOR_HANDLE*, const D3D12_VIEWPORT*, const D3D12_RECT*);
 	void Draw(const std::wstring&, DirectX::XMFLOAT2 pos, DirectX::XMFLOAT2 scale = { 1.0f, 1.0f }, DirectX::XMFLOAT4 color = { 1.0f, 1.0f, 1.0f, 1.0f });
 	bool End();

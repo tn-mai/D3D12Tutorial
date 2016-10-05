@@ -513,22 +513,24 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	if (FAILED(hr)) {
 		return false;
 	}
-	hr = d3dStuff.prologueCommandList->Close();
-	if (FAILED(hr)) {
-		d3dStuff.running = false;
+	if (FAILED(d3dStuff.prologueCommandList->Close())) {
+		return false;
 	}
 	hr = d3dStuff.device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, d3dStuff.commandAllocator[0].Get(), nullptr, IID_PPV_ARGS(d3dStuff.epilogueCommandList.GetAddressOf()));
 	if (FAILED(hr)) {
 		return false;
 	}
-	hr = d3dStuff.epilogueCommandList->Close();
-	if (FAILED(hr)) {
-		d3dStuff.running = false;
+	if (FAILED(d3dStuff.epilogueCommandList->Close())) {
+		return false;
 	}
 	hr = d3dStuff.device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, d3dStuff.commandAllocator[0].Get(), nullptr, IID_PPV_ARGS(d3dStuff.commandList.GetAddressOf()));
 	if (FAILED(hr)) {
 		return false;
 	}
+	if (FAILED(d3dStuff.commandList->Close())) {
+		return false;
+	}
+
 
 	// フェンスとフェンスイベントを作成.
 	// DirectX 12では、GPUの描画終了を検出するためにフェンスというものを使う.
@@ -637,9 +639,10 @@ bool Init3D(Direct3DStuff& d3dStuff)
 		return false;
 	}
 
+	ResourceLoader resourceLoader = ResourceLoader::Open(d3dStuff.device);
+
 	// 頂点バッファを作成.
-	ComPtr<ID3D12Resource> vbUploadHeap;
-	if (!UploadToGpuMemory(d3dStuff.vertexBuffer, vbUploadHeap, d3dStuff.device, d3dStuff.commandList, &CD3DX12_RESOURCE_DESC::Buffer(sizeof(vertexList)), vertexList, sizeof(vertexList), sizeof(vertexList), sizeof(vertexList), D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, L"Vertex Buffer")) {
+	if (!resourceLoader.Upload(d3dStuff.vertexBuffer, &CD3DX12_RESOURCE_DESC::Buffer(sizeof(vertexList)), vertexList, sizeof(vertexList), sizeof(vertexList), sizeof(vertexList), D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)) {
 		return false;
 	}
 	d3dStuff.vertexBufferView.BufferLocation = d3dStuff.vertexBuffer->GetGPUVirtualAddress();
@@ -647,8 +650,7 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	d3dStuff.vertexBufferView.SizeInBytes = sizeof(vertexList);
 
 	// インデックスバッファを作成.
-	ComPtr<ID3D12Resource> ibUploadHeap;
-	if (!UploadToGpuMemory(d3dStuff.indexBuffer, ibUploadHeap, d3dStuff.device, d3dStuff.commandList, &CD3DX12_RESOURCE_DESC::Buffer(sizeof(indexList)), indexList, sizeof(indexList), sizeof(indexList), sizeof(indexList), D3D12_RESOURCE_STATE_INDEX_BUFFER, L"Index Buffer")) {
+	if (!resourceLoader.Upload(d3dStuff.indexBuffer, &CD3DX12_RESOURCE_DESC::Buffer(sizeof(indexList)), indexList, sizeof(indexList), sizeof(indexList), sizeof(indexList), D3D12_RESOURCE_STATE_INDEX_BUFFER)) {
 		return false;
 	}
 	d3dStuff.indexBufferView.BufferLocation = d3dStuff.indexBuffer->GetGPUVirtualAddress();
@@ -656,7 +658,7 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	d3dStuff.indexBufferView.Format = DXGI_FORMAT_R32_UINT;
 
 	// テクスチャを読み込む.
-	if (!d3dStuff.engine.LoadTexture(textureName)) {
+	if (!d3dStuff.engine.LoadTexture(resourceLoader, textureName)) {
 		return false;
 	}
 
@@ -664,37 +666,25 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	if (!LoadFont(d3dStuff.fontInfo, L"Res/ArialBlack.fnt", static_cast<float>(d3dStuff.width), static_cast<float>(d3dStuff.height))) {
 		return false;
 	}
-	Texture::Loader textureLoader;
-	D3D12_RESOURCE_DESC fontTextureDesc;
-	int fontImageBytesPerRow;
-	std::vector<uint8_t> fontImageData;
-	if (!textureLoader.LoadFromFile((std::wstring(L"Res/") + d3dStuff.fontInfo.fontImage).c_str(), fontImageData, fontTextureDesc, fontImageBytesPerRow)) {
+	const std::wstring fontTextureName(std::wstring(L"Res/") + d3dStuff.fontInfo.fontImage);
+	if (!d3dStuff.engine.LoadTexture(resourceLoader, fontTextureName.c_str())) {
 		return false;
 	}
-	UINT64 fontTextureHeapSize;
-	d3dStuff.device->GetCopyableFootprints(&fontTextureDesc, 0, 1, 0, nullptr, nullptr, nullptr, &fontTextureHeapSize);
-	ComPtr<ID3D12Resource> fontTextureUploadHeap;
-	if (!UploadToGpuMemory(d3dStuff.fontInfo.textureBuffer, fontTextureUploadHeap, d3dStuff.device, d3dStuff.commandList, &fontTextureDesc, fontImageData.data(), fontTextureHeapSize, fontImageBytesPerRow, fontImageBytesPerRow * fontTextureDesc.Height, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, L"Font Textre Buffer")) {
-		return false;
-	}
-	d3dStuff.fontInfo.srvHandle = d3dStuff.engine.CreateSRVHandle(d3dStuff.fontInfo.textureBuffer, fontTextureDesc.Format);
+	d3dStuff.fontInfo.srvHandle = d3dStuff.engine.GetTextureHandle(fontTextureName.c_str());
 
-	// ここまでに積まれたコマンドを実行.
-	hr = d3dStuff.commandList->Close();
-	if (FAILED(hr)) {
+	if (!d3dStuff.fontRenderer.Init(d3dStuff.device, resourceLoader)) {
+		return false;
+	}
+
+	if (!d3dStuff.spriteRenderer.Init(d3dStuff.device, resourceLoader, d3dStuff.frameBufferCount, 1024)) {
 		return false;
 	}
 
-	UploadBufferList uploadBufferList;
-	if (!d3dStuff.fontRenderer.Init(d3dStuff.device, uploadBufferList)) {
+	// ここまでに積まれたコマンドを実行.
+	if (!resourceLoader.Close()) {
 		return false;
 	}
-
-	if (!d3dStuff.spriteRenderer.Init(d3dStuff.device, uploadBufferList, d3dStuff.frameBufferCount, 1024)) {
-		return false;
-	}
-
-	ID3D12CommandList* commandListArray[] = { d3dStuff.commandList.Get(), d3dStuff.fontRenderer.GetCommandList(), d3dStuff.spriteRenderer.GetCommandList(), d3dStuff.engine.GetTextureCommandList() };
+	ID3D12CommandList* commandListArray[] = { d3dStuff.commandList.Get(), resourceLoader.GetCommandList() };
 	d3dStuff.commandQueue->ExecuteCommandLists(_countof(commandListArray), commandListArray);
 	hr = d3dStuff.commandQueue->Signal(d3dStuff.fence.Get(), d3dStuff.masterFenceValue);
 	if (FAILED(hr)) {

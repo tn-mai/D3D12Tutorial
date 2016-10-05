@@ -5,6 +5,73 @@
 
 using Microsoft::WRL::ComPtr;
 
+ResourceLoader ResourceLoader::Open(Microsoft::WRL::ComPtr<ID3D12Device> device)
+{
+	ResourceLoader rl;
+
+	HRESULT hr;
+	hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(rl.commandAllocator.GetAddressOf()));
+	if (FAILED(hr)) {
+		return rl;
+	}
+	hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, rl.commandAllocator.Get(), nullptr, IID_PPV_ARGS(rl.commandList.GetAddressOf()));
+	if (FAILED(hr)) {
+		return rl;
+	}
+	rl.device = device;
+	return rl;
+}
+
+bool ResourceLoader::Upload(Microsoft::WRL::ComPtr<ID3D12Resource>& buffer, const D3D12_RESOURCE_DESC* desc, const void* data, size_t dataSize, int rowPitch, int slicePitch, D3D12_RESOURCE_STATES finishState)
+{
+	HRESULT hr = device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE,
+		desc,
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		nullptr,
+		IID_PPV_ARGS(buffer.GetAddressOf())
+	);
+	if (FAILED(hr)) {
+		return false;
+	}
+	buffer->SetName(L"ResourceLoader");
+
+	ComPtr<ID3D12Resource> uploadBuffer;
+	hr = device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(dataSize),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(uploadBuffer.GetAddressOf())
+	);
+	if (FAILED(hr)) {
+		return false;
+	}
+	uploadBuffer->SetName(L"ResourceLoader(Uplaod Heap)");
+	D3D12_SUBRESOURCE_DATA vertexData = {};
+	vertexData.pData = data;
+	vertexData.RowPitch = rowPitch;
+	vertexData.SlicePitch = slicePitch;
+	if (UpdateSubresources<1>(commandList.Get(), buffer.Get(), uploadBuffer.Get(), 0, 0, 1, &vertexData) == 0) {
+		return false;
+	}
+	commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(buffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, finishState));
+	uploadBufferList.push_back(uploadBuffer);
+	return true;
+}
+
+bool ResourceLoader::Close()
+{
+	return SUCCEEDED(commandList->Close());
+}
+
+ID3D12GraphicsCommandList* ResourceLoader::GetCommandList()
+{
+	return commandList.Get();
+}
+
 bool DescriptorHeapManager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device> dev, int size)
 {
 	device = dev;
@@ -133,5 +200,5 @@ bool Engine::Initialize(HWND hwnd, int width, int height)
 
 	cbvSrvUavDescriptorHeap.Initialize(device, 100);
 
-	return textureManager.Initialize(device, &cbvSrvUavDescriptorHeap);
+	return textureManager.Initialize(&cbvSrvUavDescriptorHeap);
 }

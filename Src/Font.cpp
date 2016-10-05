@@ -2,6 +2,7 @@
 * @file Font.cpp
 */
 #include "Font.h"
+#include "Engine.h"
 #include <algorithm>
 #include <fstream>
 
@@ -181,7 +182,7 @@ FontRenderer::FontRenderer() :
 {
 }
 
-bool FontRenderer::Init(Microsoft::WRL::ComPtr<ID3D12Device> device, UploadBufferList& uploadBufferList)
+bool FontRenderer::Init(Microsoft::WRL::ComPtr<ID3D12Device> device, ResourceLoader& resourceLoader)
 {
 	HRESULT hr;
 	{
@@ -279,6 +280,10 @@ bool FontRenderer::Init(Microsoft::WRL::ComPtr<ID3D12Device> device, UploadBuffe
 	if (FAILED(hr)) {
 		return false;
 	}
+	hr = commandList->Close();
+	if (FAILED(hr)) {
+		return false;
+	}
 
 	for (int i = 0; i < frameBufferCount; ++i) {
 		hr = device->CreateCommittedResource(
@@ -302,7 +307,6 @@ bool FontRenderer::Init(Microsoft::WRL::ComPtr<ID3D12Device> device, UploadBuffe
 		fontVertexBufferView[i].StrideInBytes = sizeof(FontVertex);
 		fontVertexBufferView[i].SizeInBytes = maxFontCharacters * sizeof(FontVertex);
 	}
-	ComPtr<ID3D12Resource> fontIBUploadHeap;
 	std::vector<DWORD> fontIndexList;
 	fontIndexList.resize(maxFontCharacters * 6);
 	for (int i = 0; i < maxFontCharacters; ++i) {
@@ -314,18 +318,13 @@ bool FontRenderer::Init(Microsoft::WRL::ComPtr<ID3D12Device> device, UploadBuffe
 		fontIndexList[i * 6 + 5] = i * 4 + 1;
 	}
 	const size_t fontIndexListSize = maxFontCharacters * 6 * sizeof(DWORD);
-	if (!UploadToGpuMemory(fontIndexBuffer, fontIBUploadHeap, device, commandList, &CD3DX12_RESOURCE_DESC::Buffer(fontIndexListSize), fontIndexList.data(), fontIndexListSize, fontIndexListSize, fontIndexListSize, D3D12_RESOURCE_STATE_INDEX_BUFFER, L"Font Index Buffer")) {
+	if (!resourceLoader.Upload(fontIndexBuffer, &CD3DX12_RESOURCE_DESC::Buffer(fontIndexListSize), fontIndexList.data(), fontIndexListSize, fontIndexListSize, fontIndexListSize, D3D12_RESOURCE_STATE_INDEX_BUFFER)) {
 		return false;
 	}
 	fontIndexBufferView.BufferLocation = fontIndexBuffer->GetGPUVirtualAddress();
 	fontIndexBufferView.SizeInBytes = fontIndexListSize;
 	fontIndexBufferView.Format = DXGI_FORMAT_R32_UINT;
 
-	hr = commandList->Close();
-	if (FAILED(hr)) {
-		return false;
-	}
-	uploadBufferList.push_back(fontIBUploadHeap);
 	return true;
 }
 

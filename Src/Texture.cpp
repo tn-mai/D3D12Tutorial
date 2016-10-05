@@ -261,25 +261,14 @@ namespace Texture {
 	/**
 	* テクスチャマネージャを初期化する.
 	*/
-	bool Manager::Initialize(Microsoft::WRL::ComPtr<ID3D12Device> device, DescriptorHeapManager* heap)
+	bool Manager::Initialize(DescriptorHeapManager* heap)
 	{
-		HRESULT hr;
-
-		hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(commandAllocator.GetAddressOf()));
-		if (FAILED(hr)) {
-			return false;
-		}
-		hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(commandList.GetAddressOf()));
-		if (FAILED(hr)) {
-			return false;
-		}
-
 		descriptorHeap = heap;
 
 		return true;
 	}
 
-	bool Manager::LoadFromFile(Microsoft::WRL::ComPtr<ID3D12Device> device, const wchar_t* filename)
+	bool Manager::LoadFromFile(ResourceLoader& resourceLoader, const wchar_t* filename)
 	{
 		if (descriptorHeap->Empty()) {
 			return false;
@@ -293,15 +282,12 @@ namespace Texture {
 		}
 
 		UINT64 textureHeapSize;
-		device->GetCopyableFootprints(&textureDesc, 0, 1, 0, nullptr, nullptr, nullptr, &textureHeapSize);
+		resourceLoader.GetDevice()->GetCopyableFootprints(&textureDesc, 0, 1, 0, nullptr, nullptr, nullptr, &textureHeapSize);
 
 		TextureInfo textureInfo;
-		ResourcePtr uploadBuffer;
-		if (!UploadToGpuMemory(textureInfo.buffer, uploadBuffer, device, commandList, &textureDesc, imageData.data(), textureHeapSize, imageBytesPerRow, imageBytesPerRow * textureDesc.Height, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, L"Textre Buffer")) {
+		if (!resourceLoader.Upload(textureInfo.buffer, &textureDesc, imageData.data(), textureHeapSize, imageBytesPerRow, imageBytesPerRow * textureDesc.Height, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)) {
 			return false;
 		}
-		uploadBufferList.push_back(uploadBuffer);
-
 		textureInfo.srvHandle = descriptorHeap->GetFreeSRVHandle(textureInfo.buffer, textureDesc.Format);
 		textureInfo.format = textureDesc.Format;
 		textureList.insert({filename, textureInfo});
@@ -317,17 +303,6 @@ namespace Texture {
 		}
 		descriptorHeap->ReleaseHandle(itr->second.srvHandle);
 		textureList.erase(itr);
-	}
-
-	ID3D12GraphicsCommandList* Manager::GetCommandList()
-	{
-		commandList->Close();
-		return commandList.Get();
-	}
-
-	void Manager::ClearUploadBuffer()
-	{
-		uploadBufferList.clear();
 	}
 
 	D3D12_GPU_DESCRIPTOR_HANDLE Manager::GetTextureHandle(const wchar_t* filename) const
