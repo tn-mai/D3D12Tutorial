@@ -11,8 +11,8 @@ namespace /* unnamed */ {
 #define FLAG(f) static_cast<int>(AnimationFlag::f)
 
 const AnimationChip anmPlayerStandard[] = {
-	{ 0.1f, FLAG(None), XMFLOAT2(0.0f, 0.0f), XMFLOAT2(0.125f, 0.125f) },
-	{ 0.1f, FLAG(Loop), XMFLOAT2(0.0f, 0.0f), XMFLOAT2(0.125f, 0.125f) },
+	{ 0.5f, FLAG(None), XMFLOAT2(0.0f, 0.0f), XMFLOAT2(0.125f, 0.125f) },
+	{ 0.5f, FLAG(HFlip) | FLAG(Loop), XMFLOAT2(0.0f, 0.0f), XMFLOAT2(0.125f, 0.125f) },
 };
 const AnimationChip anmPlayerLeft[] = {
 	{ 0.1f, FLAG(None), XMFLOAT2(0.0f, 0.0f), XMFLOAT2(0.125f, 0.125f) },
