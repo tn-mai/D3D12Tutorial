@@ -4,13 +4,13 @@
 #ifndef TUTORIAL_SRC_ENGINE_H_
 #define TUTORIAL_SRC_ENGINE_H_
 #include "Texture.h"
+#include "Font.h"
 #include <wrl/client.h>
 #include <vector>
 #include <d3d12.h>
 #include <dxgi1_4.h>
 //#include "Sprite.h"
 //#include "Entity.h"
-//#include "Font.h"
 
 /**
 * 頂点やインデックス、テクスチャなどのデータをVRAMに転送するためのヘルパークラス.
@@ -52,6 +52,26 @@ private:
 	int descriptorSize;
 };
 
+struct PipelineStateObject
+{
+	Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+	Microsoft::WRL::ComPtr<ID3DBlob> signatureBlob;
+	Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature;
+	Microsoft::WRL::ComPtr<ID3DBlob> vertexShaderBlob;
+	Microsoft::WRL::ComPtr<ID3DBlob> pixelShaderBlob;
+};
+
+class PipelineStateManager
+{
+public:
+	PipelineStateManager();
+	void Initialize();
+	bool CreatePSO(const D3D12_ROOT_SIGNATURE_DESC&, const wchar_t* vs, const wchar_t* ps, bool depthEnable, const D3D12_INPUT_ELEMENT_DESC*, size_t numInputDesc, const D3D12_RENDER_TARGET_BLEND_DESC&);
+	PipelineStateObject* GetPSO();
+private:
+	std::vector<PipelineStateObject> psoList;
+};
+
 class Engine
 {
 public:
@@ -79,6 +99,8 @@ public:
 	bool IsRunning() const { return running; }
 	bool IsInitialized() const { return initialized; }
 	int GetFrameIndex() const { return frameIndex; }
+	const D3D12_VIEWPORT& GetViewport() const { return viewport; }
+	const D3D12_RECT& GetScissorRect() const { return scissorRect; }
 
 	bool LoadTexture(ResourceLoader& resourceLoader, const wchar_t* filename) { return textureManager.LoadFromFile(resourceLoader, filename); }
 	D3D12_GPU_DESCRIPTOR_HANDLE GetTextureHandle(const wchar_t* filename) const { return textureManager.GetTextureHandle(filename); }
@@ -86,6 +108,11 @@ public:
 	ID3D12DescriptorHeap* GetDescriptorHeap() { return cbvSrvUavDescriptorHeap.Get(); }
 
 	uint8_t* GetConstantBufferAddress(int n) { return static_cast<uint8_t*>(cbvHeapBegin[n]); }
+
+	void ClearAllText() { textList.clear(); }
+	void AddText(const wchar_t* text, DirectX::XMFLOAT2 pos, DirectX::XMFLOAT2 scale, DirectX::XMFLOAT4 color = { 1.0f, 1.0f, 1.0f, 1.0f }) {
+		textList.push_back({ text, pos, scale, color });
+	}
 
 private:
 	int width;
@@ -95,6 +122,9 @@ private:
 	bool warp;
 	bool initialized;
 	HWND hwnd;
+
+	D3D12_VIEWPORT viewport;
+	D3D12_RECT scissorRect;
 
 	Microsoft::WRL::ComPtr<ID3D12Device> device;
 	Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain;
@@ -118,7 +148,16 @@ private:
 
 	DescriptorHeapManager cbvSrvUavDescriptorHeap;
 
-	//FontRenderer fontRendrer;
+	Font fontInfo;
+	FontRenderer fontRenderer;
+	struct TextInfo {
+		std::wstring text;
+		DirectX::XMFLOAT2 position;
+		DirectX::XMFLOAT2 scale;
+		DirectX::XMFLOAT4 color;
+	};
+	std::vector<TextInfo> textList;
+
 	//SpriteRenderer spriteRenderer;
 	//EntityList entytyList;
 	Texture::Manager  textureManager;

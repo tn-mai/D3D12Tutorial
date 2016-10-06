@@ -3,7 +3,6 @@
 */
 #include "stdafx.h"
 #include "Texture.h"
-#include "Font.h"
 #include "Sprite.h"
 #include "Engine.h"
 #include <algorithm>
@@ -124,8 +123,6 @@ struct Direct3DStuff {
 	ComPtr<ID3D12PipelineState> pso;
 	ComPtr<ID3DBlob> signatureBlob;
 	ComPtr<ID3D12RootSignature> rootSignature;
-	D3D12_VIEWPORT viewport;
-	D3D12_RECT scissorRect;
 
 	ComPtr<ID3D12Resource> vertexBuffer;
 	D3D12_VERTEX_BUFFER_VIEW vertexBufferView;
@@ -145,8 +142,6 @@ struct Direct3DStuff {
 
 	ObjectState objectState[objectCount];
 
-	Font fontInfo;
-	FontRenderer fontRenderer;
 	SpriteRenderer spriteRenderer;
 };
 
@@ -438,20 +433,6 @@ bool Init3D(Direct3DStuff& d3dStuff, int width, int height, bool fullscreen, HWN
 		return false;
 	}
 
-	// フォントを読み込む.
-	if (!LoadFont(d3dStuff.fontInfo, L"Res/ArialBlack.fnt", static_cast<float>(d3dStuff.engine.GetWidth()), static_cast<float>(d3dStuff.engine.GetHeight()))) {
-		return false;
-	}
-	const std::wstring fontTextureName(std::wstring(L"Res/") + d3dStuff.fontInfo.fontImage);
-	if (!d3dStuff.engine.LoadTexture(resourceLoader, fontTextureName.c_str())) {
-		return false;
-	}
-	d3dStuff.fontInfo.srvHandle = d3dStuff.engine.GetTextureHandle(fontTextureName.c_str());
-
-	if (!d3dStuff.fontRenderer.Init(d3dStuff.engine.GetDevice(), resourceLoader)) {
-		return false;
-	}
-
 	if (!d3dStuff.spriteRenderer.Init(d3dStuff.engine.GetDevice(), resourceLoader, d3dStuff.frameBufferCount, 1024)) {
 		return false;
 	}
@@ -464,18 +445,6 @@ bool Init3D(Direct3DStuff& d3dStuff, int width, int height, bool fullscreen, HWN
 	if (!d3dStuff.engine.ExecuteCommandList(_countof(commandListArray), commandListArray)) {
 		return false;
 	}
-
-	d3dStuff.viewport.TopLeftX = 0;
-	d3dStuff.viewport.TopLeftY = 0;
-	d3dStuff.viewport.Width = static_cast<float>(d3dStuff.engine.GetWidth());
-	d3dStuff.viewport.Height = static_cast<float>(d3dStuff.engine.GetHeight());
-	d3dStuff.viewport.MinDepth = 0.0f;
-	d3dStuff.viewport.MaxDepth = 1.0f;
-
-	d3dStuff.scissorRect.left = 0;
-	d3dStuff.scissorRect.top = 0;
-	d3dStuff.scissorRect.right = d3dStuff.engine.GetWidth();
-	d3dStuff.scissorRect.bottom = d3dStuff.engine.GetHeight();
 
 	DirectX::XMStoreFloat4x4(
 		&d3dStuff.matProjection,
@@ -559,8 +528,8 @@ void Render(Direct3DStuff& d3dStuff)
 	ID3D12DescriptorHeap* heapList[] = { d3dStuff.engine.GetDescriptorHeap() };
 	commandList->SetDescriptorHeaps(_countof(heapList), heapList);
 	commandList->SetGraphicsRootDescriptorTable(1, d3dStuff.engine.GetTextureHandle(textureName));
-	commandList->RSSetViewports(1, &d3dStuff.viewport);
-	commandList->RSSetScissorRects(1, &d3dStuff.scissorRect);
+	commandList->RSSetViewports(1, &d3dStuff.engine.GetViewport());
+	commandList->RSSetScissorRects(1, &d3dStuff.engine.GetScissorRect());
 	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	commandList->IASetVertexBuffers(0, 1, &d3dStuff.vertexBufferView);
 	commandList->IASetIndexBuffer(&d3dStuff.indexBufferView);
@@ -576,18 +545,10 @@ void Render(Direct3DStuff& d3dStuff)
 	}
 
 	// フォントを描画.
-	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = d3dStuff.engine.GetCurrentRTVHandle();
-	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = d3dStuff.engine.GetCurrentDSVHandle();
-	if (!d3dStuff.fontRenderer.Begin(&d3dStuff.fontInfo, d3dStuff.engine.GetFrameIndex(), &rtvHandle, &dsvHandle, &d3dStuff.viewport, &d3dStuff.scissorRect)) {
-		d3dStuff.engine.StopRunning();
-	}
-	d3dStuff.fontRenderer.Draw(L"FontTest", DirectX::XMFLOAT2(0.02f, 0.01f), DirectX::XMFLOAT2(2.0f, 2.0f));
-	if (!d3dStuff.fontRenderer.End()) {
-		d3dStuff.engine.StopRunning();
-	}
+	d3dStuff.engine.ClearAllText();
+	d3dStuff.engine.AddText(L"FontTest", DirectX::XMFLOAT2(0.02f, 0.01f), DirectX::XMFLOAT2(2.0f, 2.0f));
 
-	ID3D12CommandList* commandListArray[] = { d3dStuff.fontRenderer.GetCommandList() };
-	d3dStuff.engine.EndRender(_countof(commandListArray), commandListArray);
+	d3dStuff.engine.EndRender(0, nullptr);
 }
 
 /**

@@ -377,6 +377,39 @@ bool Engine::Initialize(HWND hw, int w, int h, bool fs)
 		return false;
 	}
 
+	// フォントを読み込む.
+	if (!LoadFont(fontInfo, L"Res/ArialBlack.fnt", static_cast<float>(width), static_cast<float>(height))) {
+		return false;
+	}
+	ResourceLoader resourceLoader = ResourceLoader::Open(device);
+	const std::wstring fontTextureName(std::wstring(L"Res/") + fontInfo.fontImage);
+	if (!LoadTexture(resourceLoader, fontTextureName.c_str())) {
+		return false;
+	}
+	fontInfo.srvHandle = GetTextureHandle(fontTextureName.c_str());
+	if (!fontRenderer.Init(device, resourceLoader)) {
+		return false;
+	}
+	if (!resourceLoader.Close()) {
+		return false;
+	}
+	ID3D12CommandList* commandListArray[] = { resourceLoader.GetCommandList() };
+	if (!ExecuteCommandList(_countof(commandListArray), commandListArray)) {
+		return false;
+	}
+
+	viewport.TopLeftX = 0;
+	viewport.TopLeftY = 0;
+	viewport.Width = static_cast<float>(width);
+	viewport.Height = static_cast<float>(height);
+	viewport.MinDepth = 0.0f;
+	viewport.MaxDepth = 1.0f;
+
+	scissorRect.left = 0;
+	scissorRect.top = 0;
+	scissorRect.right = width;
+	scissorRect.bottom = height;
+
 	initialized = true;
 	return true;
 }
@@ -464,6 +497,18 @@ bool Engine::BeginRender(ID3D12PipelineState* pso)
 
 bool Engine::EndRender(size_t num, ID3D12CommandList** pp)
 {
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = GetCurrentRTVHandle();
+	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = GetCurrentDSVHandle();
+	if (!fontRenderer.Begin(&fontInfo, GetFrameIndex(), &rtvHandle, &dsvHandle, &viewport, &scissorRect)) {
+		StopRunning();
+	}
+	for (const auto& e : textList) {
+		fontRenderer.Draw(e.text, e.position, e.scale, e.color);
+	}
+	if (!fontRenderer.End()) {
+		StopRunning();
+	}
+
 	// 描画開始.
 	std::vector<ID3D12CommandList*> list;
 	list.reserve(3 + num);
@@ -472,17 +517,18 @@ bool Engine::EndRender(size_t num, ID3D12CommandList** pp)
 	for (size_t i = 0; i < num; ++i) {
 		list.push_back(pp[i]);
 	}
+	list.push_back(fontRenderer.GetCommandList());
 	list.push_back(epilogueCommandList.Get());
 	commandQueue->ExecuteCommandLists(static_cast<UINT>(list.size()), list.data());
 	HRESULT hr = swapChain->Present(1, 0);
 	if (FAILED(hr)) {
-		running = false;
+		StopRunning();
 	}
 
 	fenceValueForFrameBuffer[frameIndex] = masterFenceValue;
 	hr = commandQueue->Signal(fence.Get(), masterFenceValue);
 	if (FAILED(hr)) {
-		running = false;
+		StopRunning();
 	}
 	++masterFenceValue;
 
