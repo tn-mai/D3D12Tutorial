@@ -119,35 +119,7 @@ struct Direct3DStuff {
 	static const int frameBufferCount = 3;
 	static const int objectCount = 2;
 
-	int width;
-	int height;
-	bool fullScreen;
-	bool running;
-	bool warp;
-	bool initialized;
-	HWND hwnd;
-
 	Engine engine;
-
-	ComPtr<ID3D12Device> device;
-	ComPtr<IDXGISwapChain3> swapChain;
-	ComPtr<ID3D12CommandQueue> commandQueue;
-	ComPtr<ID3D12DescriptorHeap> rtvDescriptorHeap;
-	ComPtr<ID3D12Resource> renderTargetList[frameBufferCount];
-	ComPtr<ID3D12DescriptorHeap> dsvDescriptorHeap;
-	ComPtr<ID3D12Resource> depthStencilbuffer;
-	ComPtr<ID3D12Resource> cbvUploadHeapList[frameBufferCount];
-	void* cbvHeapBegin[frameBufferCount];
-	ComPtr<ID3D12GraphicsCommandList> prologueCommandList;
-	ComPtr<ID3D12GraphicsCommandList> epilogueCommandList;
-	ComPtr<ID3D12CommandAllocator> commandAllocator[frameBufferCount];
-	ComPtr<ID3D12GraphicsCommandList> commandList;
-	ComPtr<ID3D12Fence> fence;
-	HANDLE fenceEvent;
-	UINT64 masterFenceValue;
-	UINT64 fenceValueForFrameBuffer[frameBufferCount];
-	int frameIndex;
-	int rtvDescriptorSize;
 
 	ComPtr<ID3D12PipelineState> pso;
 	ComPtr<ID3DBlob> signatureBlob;
@@ -179,7 +151,7 @@ struct Direct3DStuff {
 };
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
-bool Initialize(Direct3DStuff&);
+bool Initialize(Direct3DStuff&, int, int, bool, HWND);
 void Finalize(Direct3DStuff&);
 void Update(Direct3DStuff&);
 void Render(Direct3DStuff&);
@@ -248,23 +220,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prevInstance, PWSTR cmdLine, i
 	UpdateWindow(hwnd);
 
 	Direct3DStuff d3dStuff;
-	d3dStuff.width = width;
-	d3dStuff.height = height;
-	d3dStuff.fullScreen = fullScreen;
-	d3dStuff.hwnd = hwnd;
-	d3dStuff.running = true;
-	d3dStuff.initialized = false;
-	d3dStuff.warp = false;
-	d3dStuff.masterFenceValue = 0;
-	d3dStuff.fenceEvent = nullptr;
-	if (!Initialize(d3dStuff)) {
+	if (!Initialize(d3dStuff, width, height, fullScreen, hwnd)) {
 		MessageBox(nullptr, L"DirectXの初期化に失敗", L"エラー", MB_OK | MB_ICONERROR);
 		Finalize(d3dStuff);
 		return 0;
 	}
 
 	MSG msg = { 0 };
-	while (d3dStuff.running) {
+	while (d3dStuff.engine.IsRunning()) {
 		if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
 			if (msg.message == WM_QUIT) {
 				break;
@@ -405,150 +368,20 @@ bool UploadToGpuMemory(ComPtr<ID3D12Resource>& buffer, ComPtr<ID3D12Resource>& u
 * @retval true 初期化成功.
 * @retval false 初期化失敗.
 */
-bool Init3D(Direct3DStuff& d3dStuff)
+bool Init3D(Direct3DStuff& d3dStuff, int width, int height, bool fullscreen, HWND hwnd)
 {
 	HRESULT hr;
 
-	if (!d3dStuff.engine.Initialize(d3dStuff.hwnd, d3dStuff.width, d3dStuff.height)) {
+	if (!d3dStuff.engine.Initialize(hwnd, width, height, fullscreen)) {
 		return false;
-	}
-	d3dStuff.device = d3dStuff.engine.GetDevice();
-	d3dStuff.commandQueue = d3dStuff.engine.GetCommandQueue();
-	d3dStuff.swapChain = d3dStuff.engine.GetSwapChain();
-	d3dStuff.warp = d3dStuff.engine.IsWarpDevice();
-	d3dStuff.frameIndex = d3dStuff.swapChain->GetCurrentBackBufferIndex();
-
-	// RTV用のデスクリプタヒープ及びデスクリプタを作成.
-	D3D12_DESCRIPTOR_HEAP_DESC rtvDesc = {};
-	rtvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-	rtvDesc.NumDescriptors = d3dStuff.frameBufferCount;
-	rtvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-	hr = d3dStuff.device->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(d3dStuff.rtvDescriptorHeap.GetAddressOf()));
-	if (FAILED(hr)) {
-		return false;
-	}
-	d3dStuff.rtvDescriptorSize = d3dStuff.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = d3dStuff.rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-	for (int i = 0; i < d3dStuff.frameBufferCount; ++i) {
-		hr = d3dStuff.swapChain->GetBuffer(i, IID_PPV_ARGS(d3dStuff.renderTargetList[i].GetAddressOf()));
-		if (FAILED(hr)) {
-			return false;
-		}
-		d3dStuff.device->CreateRenderTargetView(d3dStuff.renderTargetList[i].Get(), nullptr, rtvHandle);
-		rtvHandle.ptr += d3dStuff.rtvDescriptorSize;
 	}
 
-	// DS用のデスクリプタヒープ及びデスクリプタを作成.
-	D3D12_DESCRIPTOR_HEAP_DESC dsvDesc = {};
-	dsvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-	dsvDesc.NumDescriptors = 1;
-	dsvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-	hr = d3dStuff.device->CreateDescriptorHeap(&dsvDesc, IID_PPV_ARGS(d3dStuff.dsvDescriptorHeap.GetAddressOf()));
-	if (FAILED(hr)) {
-		return false;
-	}
-	D3D12_DEPTH_STENCIL_VIEW_DESC depthStencilDesc = {};
-	depthStencilDesc.Format = DXGI_FORMAT_D32_FLOAT;
-	depthStencilDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-	depthStencilDesc.Flags = D3D12_DSV_FLAG_NONE;
-	D3D12_CLEAR_VALUE dsClearValue = {};
-	dsClearValue.Format = DXGI_FORMAT_D32_FLOAT;
-	dsClearValue.DepthStencil.Depth = 1.0f;
-	dsClearValue.DepthStencil.Stencil = 0;
-	hr = d3dStuff.device->CreateCommittedResource(
-		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-		D3D12_HEAP_FLAG_NONE,
-		&CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, d3dStuff.width, d3dStuff.height, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL),
-		D3D12_RESOURCE_STATE_DEPTH_WRITE,
-		&dsClearValue,
-		IID_PPV_ARGS(d3dStuff.depthStencilbuffer.GetAddressOf())
-	);
-	if (FAILED(hr)) {
-		return false;
-	}
-	d3dStuff.device->CreateDepthStencilView(d3dStuff.depthStencilbuffer.Get(), &depthStencilDesc, d3dStuff.dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-
-	// 定数バッファを作成.
 	DirectX::XMStoreFloat4x4(&d3dStuff.cbPerObject.wvpMatrix, DirectX::XMMatrixIdentity());
 	for (int i = 0; i < d3dStuff.frameBufferCount; ++i) {
-		hr = d3dStuff.device->CreateCommittedResource(
-			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-			D3D12_HEAP_FLAG_NONE,
-			&CD3DX12_RESOURCE_DESC::Buffer(AlignedConstantBufferSize * d3dStuff.objectCount),
-			D3D12_RESOURCE_STATE_GENERIC_READ,
-			nullptr,
-			IID_PPV_ARGS(d3dStuff.cbvUploadHeapList[i].GetAddressOf())
-		);
-		if (FAILED(hr)) {
-			return false;
-		}
-		d3dStuff.cbvUploadHeapList[i]->SetName(L"CBV Upload Heap");
-		D3D12_RANGE  cbvRange = { 0, 0 };
-		hr = d3dStuff.cbvUploadHeapList[i]->Map(0, &cbvRange, &d3dStuff.cbvHeapBegin[i]);
-		if (FAILED(hr)) {
-			return false;
-		}
-		memcpy(d3dStuff.cbvHeapBegin[i], &d3dStuff.cbPerObject, sizeof(d3dStuff.cbPerObject));
-		memcpy(static_cast<uint8_t*>(d3dStuff.cbvHeapBegin[i]) + AlignedConstantBufferSize, &d3dStuff.cbPerObject, sizeof(d3dStuff.cbPerObject));
+		uint8_t* p = d3dStuff.engine.GetConstantBufferAddress(i);
+		memcpy(p, &d3dStuff.cbPerObject, sizeof(d3dStuff.cbPerObject));
+		memcpy(p + AlignedConstantBufferSize, &d3dStuff.cbPerObject, sizeof(d3dStuff.cbPerObject));
 	}
-
-	// コマンドアロケータを作成.
-	// コマンドアロケータは描画中にGPUが実行する各コマンドを保持する.
-	// GPUが描画中のコマンドを破棄した場合、GPUの動作は未定義になってしまう. そのため、描画中はコマンドを保持し続ける必要がある.
-	// ここでは、各バックバッファにひとつづつコマンドアロケータを持たせる.
-	// これによって、あるバックバッファが描画中でも、他のバックバッファのためのコマンドを生成・破棄できるようにする.
-	for (int i = 0; i < d3dStuff.frameBufferCount; ++i) {
-		hr = d3dStuff.device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(d3dStuff.commandAllocator[i].GetAddressOf()));
-		if (FAILED(hr)) {
-			return false;
-		}
-	}
-
-	// コマンドリストを作成.
-	// コマンドアロケータと異なり、コマンドリストはコマンドキューが実行されたあとならいつでもリセットできる.
-	// バックバッファ毎に持つ必要がないため1つだけ作ればよい.
-	// そのかわり、描画したいバックバッファが変わる毎に、対応するコマンドアロケータを設定し直す必要がある.
-	// 生成された直後のコマンドリストはリセットが呼び出された直後と同じ状態になっているため、すぐにコマンドを送り込むことが出来る.
-	hr = d3dStuff.device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, d3dStuff.commandAllocator[0].Get(), nullptr, IID_PPV_ARGS(d3dStuff.prologueCommandList.GetAddressOf()));
-	if (FAILED(hr)) {
-		return false;
-	}
-	if (FAILED(d3dStuff.prologueCommandList->Close())) {
-		return false;
-	}
-	hr = d3dStuff.device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, d3dStuff.commandAllocator[0].Get(), nullptr, IID_PPV_ARGS(d3dStuff.epilogueCommandList.GetAddressOf()));
-	if (FAILED(hr)) {
-		return false;
-	}
-	if (FAILED(d3dStuff.epilogueCommandList->Close())) {
-		return false;
-	}
-	hr = d3dStuff.device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, d3dStuff.commandAllocator[0].Get(), nullptr, IID_PPV_ARGS(d3dStuff.commandList.GetAddressOf()));
-	if (FAILED(hr)) {
-		return false;
-	}
-	if (FAILED(d3dStuff.commandList->Close())) {
-		return false;
-	}
-
-
-	// フェンスとフェンスイベントを作成.
-	// DirectX 12では、GPUの描画終了を検出するためにフェンスというものを使う.
-	// フェンスはOSのイベントを関連付けることができるように設計されている.
-	// そこで、OSのイベントを作成し、フェンスをコマンドリストへ設定するときに関連付ける.
-	hr = d3dStuff.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(d3dStuff.fence.GetAddressOf()));
-	if (FAILED(hr)) {
-		return false;
-	}
-	d3dStuff.fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-	if (!d3dStuff.fenceEvent) {
-		return false;
-	}
-	++d3dStuff.masterFenceValue;
-	for (int i = 0; i < d3dStuff.frameBufferCount; ++i) {
-		d3dStuff.fenceValueForFrameBuffer[i] = 0;
-	}
-
 	// ルートシグネチャを作成.
 	// ルートパラメータのShaderVisibilityは適切に設定する必要がある.
 	// ルートシグネチャが正しく設定されていない場合でも、シグネチャの作成には成功することがある.
@@ -597,7 +430,7 @@ bool Init3D(Direct3DStuff& d3dStuff)
 		if (FAILED(hr)) {
 			return false;
 		}
-		hr = d3dStuff.device->CreateRootSignature(0, d3dStuff.signatureBlob->GetBufferPointer(), d3dStuff.signatureBlob->GetBufferSize(), IID_PPV_ARGS(d3dStuff.rootSignature.GetAddressOf()));
+		hr = d3dStuff.engine.GetDevice()->CreateRootSignature(0, d3dStuff.signatureBlob->GetBufferPointer(), d3dStuff.signatureBlob->GetBufferSize(), IID_PPV_ARGS(d3dStuff.rootSignature.GetAddressOf()));
 		if (FAILED(hr)) {
 			return false;
 		}
@@ -631,15 +464,15 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	psoDesc.NumRenderTargets = 1;
 	psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
 	psoDesc.SampleDesc.Count = 1;
-	if (d3dStuff.warp) {
+	if (d3dStuff.engine.IsWarpDevice()) {
 		psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_TOOL_DEBUG;
 	}
-	hr = d3dStuff.device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(d3dStuff.pso.GetAddressOf()));
+	hr = d3dStuff.engine.GetDevice()->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(d3dStuff.pso.GetAddressOf()));
 	if (FAILED(hr)) {
 		return false;
 	}
 
-	ResourceLoader resourceLoader = ResourceLoader::Open(d3dStuff.device);
+	ResourceLoader resourceLoader = ResourceLoader::Open(d3dStuff.engine.GetDevice());
 
 	// 頂点バッファを作成.
 	if (!resourceLoader.Upload(d3dStuff.vertexBuffer, &CD3DX12_RESOURCE_DESC::Buffer(sizeof(vertexList)), vertexList, sizeof(vertexList), sizeof(vertexList), sizeof(vertexList), D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)) {
@@ -663,7 +496,7 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	}
 
 	// フォントを読み込む.
-	if (!LoadFont(d3dStuff.fontInfo, L"Res/ArialBlack.fnt", static_cast<float>(d3dStuff.width), static_cast<float>(d3dStuff.height))) {
+	if (!LoadFont(d3dStuff.fontInfo, L"Res/ArialBlack.fnt", static_cast<float>(d3dStuff.engine.GetWidth()), static_cast<float>(d3dStuff.engine.GetHeight()))) {
 		return false;
 	}
 	const std::wstring fontTextureName(std::wstring(L"Res/") + d3dStuff.fontInfo.fontImage);
@@ -672,11 +505,11 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	}
 	d3dStuff.fontInfo.srvHandle = d3dStuff.engine.GetTextureHandle(fontTextureName.c_str());
 
-	if (!d3dStuff.fontRenderer.Init(d3dStuff.device, resourceLoader)) {
+	if (!d3dStuff.fontRenderer.Init(d3dStuff.engine.GetDevice(), resourceLoader)) {
 		return false;
 	}
 
-	if (!d3dStuff.spriteRenderer.Init(d3dStuff.device, resourceLoader, d3dStuff.frameBufferCount, 1024)) {
+	if (!d3dStuff.spriteRenderer.Init(d3dStuff.engine.GetDevice(), resourceLoader, d3dStuff.frameBufferCount, 1024)) {
 		return false;
 	}
 
@@ -684,33 +517,28 @@ bool Init3D(Direct3DStuff& d3dStuff)
 	if (!resourceLoader.Close()) {
 		return false;
 	}
-	ID3D12CommandList* commandListArray[] = { d3dStuff.commandList.Get(), resourceLoader.GetCommandList() };
-	d3dStuff.commandQueue->ExecuteCommandLists(_countof(commandListArray), commandListArray);
-	hr = d3dStuff.commandQueue->Signal(d3dStuff.fence.Get(), d3dStuff.masterFenceValue);
-	if (FAILED(hr)) {
+	ID3D12CommandList* commandListArray[] = { resourceLoader.GetCommandList() };
+	if (!d3dStuff.engine.ExecuteCommandList(_countof(commandListArray), commandListArray)) {
 		return false;
 	}
-	d3dStuff.fence->SetEventOnCompletion(d3dStuff.masterFenceValue, d3dStuff.fenceEvent);
-	WaitForSingleObject(d3dStuff.fenceEvent, INFINITE);
-	++d3dStuff.masterFenceValue;
 
 	d3dStuff.viewport.TopLeftX = 0;
 	d3dStuff.viewport.TopLeftY = 0;
-	d3dStuff.viewport.Width = static_cast<float>(d3dStuff.width);
-	d3dStuff.viewport.Height = static_cast<float>(d3dStuff.height);
+	d3dStuff.viewport.Width = static_cast<float>(d3dStuff.engine.GetWidth());
+	d3dStuff.viewport.Height = static_cast<float>(d3dStuff.engine.GetHeight());
 	d3dStuff.viewport.MinDepth = 0.0f;
 	d3dStuff.viewport.MaxDepth = 1.0f;
 
 	d3dStuff.scissorRect.left = 0;
 	d3dStuff.scissorRect.top = 0;
-	d3dStuff.scissorRect.right = d3dStuff.width;
-	d3dStuff.scissorRect.bottom = d3dStuff.height;
+	d3dStuff.scissorRect.right = d3dStuff.engine.GetWidth();
+	d3dStuff.scissorRect.bottom = d3dStuff.engine.GetHeight();
 
 	DirectX::XMStoreFloat4x4(
 		&d3dStuff.matProjection,
 		DirectX::XMMatrixPerspectiveFovLH(
 			45.0f * 3.14f / 180.0f,
-			static_cast<float>(d3dStuff.width) / static_cast<float>(d3dStuff.height),
+			static_cast<float>(d3dStuff.engine.GetWidth()) / static_cast<float>(d3dStuff.engine.GetHeight()),
 			0.1f,
 			1000.0f
 		)
@@ -746,8 +574,6 @@ bool Init3D(Direct3DStuff& d3dStuff)
 		)
 	);
 
-	d3dStuff.initialized = true;
-
 	return true;
 }
 
@@ -757,11 +583,11 @@ bool Init3D(Direct3DStuff& d3dStuff)
 * @retval true 初期化成功.
 * @retval false 初期化失敗.
 */
-bool Initialize(Direct3DStuff& d3dStuff)
+bool Initialize(Direct3DStuff& d3dStuff, int w, int h, bool fs, HWND hw)
 {
 	CoInitialize(nullptr);
 	Texture::Loader::Initialize();
-	if (!Init3D(d3dStuff)) {
+	if (!Init3D(d3dStuff, w, h, fs, hw)) {
 		return false;
 	}
 	return true;
@@ -772,39 +598,9 @@ bool Initialize(Direct3DStuff& d3dStuff)
 */
 void Finalize(Direct3DStuff& d3dStuff)
 {
-	if (d3dStuff.initialized) {
-		for (int i = 0; i < d3dStuff.frameBufferCount; ++i) {
-			d3dStuff.frameIndex = i;
-			WaitForPreviousFrame(d3dStuff);
-		}
-
-		BOOL fs = FALSE;
-		if (d3dStuff.swapChain->GetFullscreenState(&fs, nullptr)) {
-			d3dStuff.swapChain->SetFullscreenState(false, nullptr);
-		}
-	}
-
-	if (d3dStuff.fenceEvent) {
-		CloseHandle(d3dStuff.fenceEvent);
-	}
+	d3dStuff.engine.Finalize();
 	Texture::Loader::Destroy();
 	CoUninitialize();
-}
-
-/**
-* 直前のフレームの描画完了を待つ.
-*/
-void WaitForPreviousFrame(Direct3DStuff& d3dStuff)
-{
-	const UINT64 lastCompletedFence = d3dStuff.fence->GetCompletedValue();
-	d3dStuff.frameIndex = d3dStuff.swapChain->GetCurrentBackBufferIndex();
-	if (d3dStuff.fenceValueForFrameBuffer[d3dStuff.frameIndex] > lastCompletedFence) {
-		HRESULT hr = d3dStuff.fence->SetEventOnCompletion(d3dStuff.fenceValueForFrameBuffer[d3dStuff.frameIndex], d3dStuff.fenceEvent);
-		if (FAILED(hr)) {
-			d3dStuff.running = false;
-		}
-		WaitForSingleObject(d3dStuff.fenceEvent, INFINITE);
-	}
 }
 
 /**
@@ -812,94 +608,43 @@ void WaitForPreviousFrame(Direct3DStuff& d3dStuff)
 */
 void Render(Direct3DStuff& d3dStuff)
 {
-	WaitForPreviousFrame(d3dStuff);
-
-	// コマンドリスト及びコマンドアロケータをリセット.
-	HRESULT hr;
-	hr = d3dStuff.commandAllocator[d3dStuff.frameIndex]->Reset();
-	if (FAILED(hr)) {
-		d3dStuff.running = false;
-	}
-
-	hr = d3dStuff.prologueCommandList->Reset(d3dStuff.commandAllocator[d3dStuff.frameIndex].Get(), d3dStuff.pso.Get());
-	if (FAILED(hr)) {
-		d3dStuff.running = false;
-	}
-	d3dStuff.prologueCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
-	hr = d3dStuff.prologueCommandList->Close();
-	if (FAILED(hr)) {
-		d3dStuff.running = false;
-	}
-
-	hr = d3dStuff.epilogueCommandList->Reset(d3dStuff.commandAllocator[d3dStuff.frameIndex].Get(), d3dStuff.pso.Get());
-	if (FAILED(hr)) {
-		d3dStuff.running = false;
-	}
-	d3dStuff.epilogueCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(d3dStuff.renderTargetList[d3dStuff.frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
-	hr = d3dStuff.epilogueCommandList->Close();
-	if (FAILED(hr)) {
-		d3dStuff.running = false;
-	}
-
-	hr = d3dStuff.commandList->Reset(d3dStuff.commandAllocator[d3dStuff.frameIndex].Get(), d3dStuff.pso.Get());
-	if (FAILED(hr)) {
-		d3dStuff.running = false;
-	}
-
-	// コマンドを積んでいく.
-	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = d3dStuff.rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-	rtvHandle.ptr += d3dStuff.frameIndex * d3dStuff.rtvDescriptorSize;
-	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = d3dStuff.dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-	d3dStuff.commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-	static const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
-	d3dStuff.commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-	d3dStuff.commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+	d3dStuff.engine.BeginRender(d3dStuff.pso.Get());
 
 	// 頂点を描画.
-	d3dStuff.commandList->SetGraphicsRootSignature(d3dStuff.rootSignature.Get());
+	ID3D12GraphicsCommandList* commandList = d3dStuff.engine.GetCommandList();
+	commandList->SetGraphicsRootSignature(d3dStuff.rootSignature.Get());
 	ID3D12DescriptorHeap* heapList[] = { d3dStuff.engine.GetDescriptorHeap() };
-	d3dStuff.commandList->SetDescriptorHeaps(_countof(heapList), heapList);
-	d3dStuff.commandList->SetGraphicsRootDescriptorTable(1, d3dStuff.engine.GetTextureHandle(textureName));
-	d3dStuff.commandList->RSSetViewports(1, &d3dStuff.viewport);
-	d3dStuff.commandList->RSSetScissorRects(1, &d3dStuff.scissorRect);
-	d3dStuff.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	d3dStuff.commandList->IASetVertexBuffers(0, 1, &d3dStuff.vertexBufferView);
-	d3dStuff.commandList->IASetIndexBuffer(&d3dStuff.indexBufferView);
-
-	D3D12_GPU_VIRTUAL_ADDRESS gpuAddress = d3dStuff.cbvUploadHeapList[d3dStuff.frameIndex]->GetGPUVirtualAddress();
+	commandList->SetDescriptorHeaps(_countof(heapList), heapList);
+	commandList->SetGraphicsRootDescriptorTable(1, d3dStuff.engine.GetTextureHandle(textureName));
+	commandList->RSSetViewports(1, &d3dStuff.viewport);
+	commandList->RSSetScissorRects(1, &d3dStuff.scissorRect);
+	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	commandList->IASetVertexBuffers(0, 1, &d3dStuff.vertexBufferView);
+	commandList->IASetIndexBuffer(&d3dStuff.indexBufferView);
+	D3D12_GPU_VIRTUAL_ADDRESS gpuAddress = d3dStuff.engine.GetCurrentCBVAddress();
 	for (int i = 0; i < d3dStuff.objectCount; ++i) {
-		d3dStuff.commandList->SetGraphicsRootConstantBufferView(0, gpuAddress);
-		d3dStuff.commandList->DrawIndexedInstanced(_countof(indexList), 1, 0, 0, 0);
+		commandList->SetGraphicsRootConstantBufferView(0, gpuAddress);
+		commandList->DrawIndexedInstanced(_countof(indexList), 1, 0, 0, 0);
 		gpuAddress += AlignedConstantBufferSize;
 	}
-
-	hr = d3dStuff.commandList->Close();
+	HRESULT hr = commandList->Close();
 	if (FAILED(hr)) {
-		d3dStuff.running = false;
+		d3dStuff.engine.StopRunning();
 	}
 
-	if (!d3dStuff.fontRenderer.Begin(&d3dStuff.fontInfo, d3dStuff.frameIndex, &rtvHandle, &dsvHandle, &d3dStuff.viewport, &d3dStuff.scissorRect)) {
-		d3dStuff.running = false;
+	// フォントを描画.
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = d3dStuff.engine.GetCurrentRTVHandle();
+	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = d3dStuff.engine.GetCurrentDSVHandle();
+	if (!d3dStuff.fontRenderer.Begin(&d3dStuff.fontInfo, d3dStuff.engine.GetFrameIndex(), &rtvHandle, &dsvHandle, &d3dStuff.viewport, &d3dStuff.scissorRect)) {
+		d3dStuff.engine.StopRunning();
 	}
 	d3dStuff.fontRenderer.Draw(L"FontTest", DirectX::XMFLOAT2(0.02f, 0.01f), DirectX::XMFLOAT2(2.0f, 2.0f));
 	if (!d3dStuff.fontRenderer.End()) {
-		d3dStuff.running = false;
+		d3dStuff.engine.StopRunning();
 	}
 
-	// 描画開始.
-	ID3D12CommandList* commandListArray[] = { d3dStuff.prologueCommandList.Get(), d3dStuff.commandList.Get(), d3dStuff.fontRenderer.GetCommandList(), d3dStuff.epilogueCommandList.Get() };
-	d3dStuff.commandQueue->ExecuteCommandLists(_countof(commandListArray), commandListArray);
-	hr = d3dStuff.swapChain->Present(1, 0);
-	if (FAILED(hr)) {
-		d3dStuff.running = false;
-	}
-
-	d3dStuff.fenceValueForFrameBuffer[d3dStuff.frameIndex] = d3dStuff.masterFenceValue;
-	hr = d3dStuff.commandQueue->Signal(d3dStuff.fence.Get(), d3dStuff.masterFenceValue);
-	if (FAILED(hr)) {
-		d3dStuff.running = false;
-	}
-	++d3dStuff.masterFenceValue;
+	ID3D12CommandList* commandListArray[] = { d3dStuff.fontRenderer.GetCommandList() };
+	d3dStuff.engine.EndRender(_countof(commandListArray), commandListArray);
 }
 
 /**
@@ -924,7 +669,7 @@ void Update(Direct3DStuff& d3dStuff)
 		DirectX::XMMATRIX transposed = XMMatrixTranspose(wvpMat);
 		DirectX::XMStoreFloat4x4(&d3dStuff.cbPerObject.wvpMatrix, transposed);
 		memcpy(
-			static_cast<uint8_t*>(d3dStuff.cbvHeapBegin[d3dStuff.frameIndex]),
+			d3dStuff.engine.GetCurrentCBVHeap(),
 			&d3dStuff.cbPerObject,
 			sizeof(d3dStuff.cbPerObject)
 		);
@@ -945,7 +690,7 @@ void Update(Direct3DStuff& d3dStuff)
 		DirectX::XMMATRIX transposed = XMMatrixTranspose(wvpMat);
 		DirectX::XMStoreFloat4x4(&d3dStuff.cbPerObject.wvpMatrix, transposed);
 		memcpy(
-			static_cast<uint8_t*>(d3dStuff.cbvHeapBegin[d3dStuff.frameIndex]) + AlignedConstantBufferSize,
+			static_cast<uint8_t*>(d3dStuff.engine.GetCurrentCBVHeap()) + AlignedConstantBufferSize,
 			&d3dStuff.cbPerObject,
 			sizeof(d3dStuff.cbPerObject)
 		);

@@ -2,6 +2,8 @@
 * @file Engine.cpp
 */
 #include "Engine.h"
+#include "d3dx12.h"
+#include <DirectXMath.h>
 
 using Microsoft::WRL::ComPtr;
 
@@ -120,13 +122,23 @@ void DescriptorHeapManager::ReleaseHandle(D3D12_GPU_DESCRIPTOR_HANDLE handle)
 	freeDescriptorList.push_back(descriptorIndex);
 }
 
-Engine::Engine()
+Engine::Engine() :
+	running(true),
+	initialized(false),
+	warp(false),
+	masterFenceValue(0),
+	fenceEvent(nullptr)
 {
 }
 
-bool Engine::Initialize(HWND hwnd, int width, int height)
+bool Engine::Initialize(HWND hw, int w, int h, bool fs)
 {
 	HRESULT hr;
+
+	width = w;
+	height = h;
+	fullScreen = fs;
+	hwnd = hw;
 
 #if !defined(NDEBUG)
 	// Enable the D3D12 debug layer.
@@ -191,14 +203,285 @@ bool Engine::Initialize(HWND hwnd, int width, int height)
 	scDesc.BufferCount = frameBufferCount;
 	scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 
-	ComPtr<IDXGISwapChain1> tmpSwapChain;
-	hr = dxgiFactory->CreateSwapChainForHwnd(commandQueue.Get(), hwnd, &scDesc, nullptr, nullptr, tmpSwapChain.GetAddressOf());
-	if (FAILED(hr)) {
-		return false;
+	{
+		ComPtr<IDXGISwapChain1> tmpSwapChain;
+		hr = dxgiFactory->CreateSwapChainForHwnd(commandQueue.Get(), hwnd, &scDesc, nullptr, nullptr, tmpSwapChain.GetAddressOf());
+		if (FAILED(hr)) {
+			return false;
+		}
+		tmpSwapChain.As(&swapChain);
 	}
-	tmpSwapChain.As(&swapChain);
+	frameIndex = swapChain->GetCurrentBackBufferIndex();
 
 	cbvSrvUavDescriptorHeap.Initialize(device, 100);
 
-	return textureManager.Initialize(&cbvSrvUavDescriptorHeap);
+	// RTV用のデスクリプタヒープ及びデスクリプタを作成.
+	D3D12_DESCRIPTOR_HEAP_DESC rtvDesc = {};
+	rtvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+	rtvDesc.NumDescriptors = frameBufferCount;
+	rtvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	hr = device->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(rtvDescriptorHeap.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+	rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	for (int i = 0; i < frameBufferCount; ++i) {
+		hr = swapChain->GetBuffer(i, IID_PPV_ARGS(renderTargetList[i].GetAddressOf()));
+		if (FAILED(hr)) {
+			return false;
+		}
+		device->CreateRenderTargetView(renderTargetList[i].Get(), nullptr, rtvHandle);
+		rtvHandle.ptr += rtvDescriptorSize;
+	}
+
+	// DS用のデスクリプタヒープ及びデスクリプタを作成.
+	D3D12_DESCRIPTOR_HEAP_DESC dsvDesc = {};
+	dsvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+	dsvDesc.NumDescriptors = 1;
+	dsvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	hr = device->CreateDescriptorHeap(&dsvDesc, IID_PPV_ARGS(dsvDescriptorHeap.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+	D3D12_DEPTH_STENCIL_VIEW_DESC depthStencilDesc = {};
+	depthStencilDesc.Format = DXGI_FORMAT_D32_FLOAT;
+	depthStencilDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+	depthStencilDesc.Flags = D3D12_DSV_FLAG_NONE;
+	D3D12_CLEAR_VALUE dsClearValue = {};
+	dsClearValue.Format = DXGI_FORMAT_D32_FLOAT;
+	dsClearValue.DepthStencil.Depth = 1.0f;
+	dsClearValue.DepthStencil.Stencil = 0;
+	hr = device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, width, height, 1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL),
+		D3D12_RESOURCE_STATE_DEPTH_WRITE,
+		&dsClearValue,
+		IID_PPV_ARGS(depthStencilbuffer.GetAddressOf())
+	);
+	if (FAILED(hr)) {
+		return false;
+	}
+	device->CreateDepthStencilView(depthStencilbuffer.Get(), &depthStencilDesc, dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
+	// 定数バッファを作成.
+	// D3D12の仕様により、リソースヒープは4MB(マルチサンプルテクスチャの場合)、あるいは64KB(その他の場合)にアラインされる.
+	// 定数バッファは「その他」なので、64KB単位で確保するのが最も効率がよい.
+	// ただし、これは確保に限ったことで、定数バッファの読み出しはもう少し細かく、256バイトアラインが要求される.
+	// そのため、SetGraphicsRootConstantBufferView()に渡すアドレスは、定数バッファの先頭から256バイト単位にする必要がある.
+	// https://msdn.microsoft.com/en-us/library/windows/desktop/dn899216(v=vs.85).aspx
+	for (int i = 0; i < frameBufferCount; ++i) {
+		hr = device->CreateCommittedResource(
+			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+			D3D12_HEAP_FLAG_NONE,
+			&CD3DX12_RESOURCE_DESC::Buffer(64 * 1024),
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(cbvUploadHeapList[i].GetAddressOf())
+		);
+		if (FAILED(hr)) {
+			return false;
+		}
+		cbvUploadHeapList[i]->SetName(L"CBV Upload Heap");
+		D3D12_RANGE  cbvRange = { 0, 0 };
+		hr = cbvUploadHeapList[i]->Map(0, &cbvRange, &cbvHeapBegin[i]);
+		if (FAILED(hr)) {
+			return false;
+		}
+	}
+
+	// コマンドアロケータを作成.
+	// コマンドアロケータは描画中にGPUが実行する各コマンドを保持する.
+	// GPUが描画中のコマンドを破棄した場合、GPUの動作は未定義になってしまう. そのため、描画中はコマンドを保持し続ける必要がある.
+	// ここでは、各バックバッファにひとつづつコマンドアロケータを持たせる.
+	// これによって、あるバックバッファが描画中でも、他のバックバッファのためのコマンドを生成・破棄できるようにする.
+	for (int i = 0; i < frameBufferCount; ++i) {
+		hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(commandAllocator[i].GetAddressOf()));
+		if (FAILED(hr)) {
+			return false;
+		}
+	}
+
+	// コマンドリストを作成.
+	// コマンドアロケータと異なり、コマンドリストはコマンドキューが実行されたあとならいつでもリセットできる.
+	// バックバッファ毎に持つ必要がないため1つだけ作ればよい.
+	// そのかわり、描画したいバックバッファが変わる毎に、対応するコマンドアロケータを設定し直す必要がある.
+	// 生成された直後のコマンドリストはリセットが呼び出された直後と同じ状態になっているため、すぐにコマンドを送り込むことが出来る.
+	hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator[0].Get(), nullptr, IID_PPV_ARGS(prologueCommandList.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+	if (FAILED(prologueCommandList->Close())) {
+		return false;
+	}
+	hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator[0].Get(), nullptr, IID_PPV_ARGS(epilogueCommandList.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+	if (FAILED(epilogueCommandList->Close())) {
+		return false;
+	}
+	hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator[0].Get(), nullptr, IID_PPV_ARGS(commandList.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+	if (FAILED(commandList->Close())) {
+		return false;
+	}
+
+	// フェンスとフェンスイベントを作成.
+	// DirectX 12では、GPUの描画終了を検出するためにフェンスというものを使う.
+	// フェンスはOSのイベントを関連付けることができるように設計されている.
+	// そこで、OSのイベントを作成し、フェンスをコマンドリストへ設定するときに関連付ける.
+	hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(fence.GetAddressOf()));
+	if (FAILED(hr)) {
+		return false;
+	}
+	fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+	if (!fenceEvent) {
+		return false;
+	}
+	++masterFenceValue;
+	for (int i = 0; i < frameBufferCount; ++i) {
+		fenceValueForFrameBuffer[i] = 0;
+	}
+
+	if (!textureManager.Initialize(&cbvSrvUavDescriptorHeap)) {
+		return false;
+	}
+
+	initialized = true;
+	return true;
 }
+
+void Engine::Finalize()
+{
+	for (int i = 0; i < frameBufferCount; ++i) {
+		frameIndex = i;
+		WaitForPreviousFrame();
+	}
+
+	BOOL fs = FALSE;
+	if (swapChain->GetFullscreenState(&fs, nullptr)) {
+		swapChain->SetFullscreenState(false, nullptr);
+	}
+
+	if (fenceEvent) {
+		CloseHandle(fenceEvent);
+	}
+}
+
+/**
+* 直前のフレームの描画完了を待つ.
+*/
+void Engine::WaitForPreviousFrame()
+{
+	const UINT64 lastCompletedFence = fence->GetCompletedValue();
+	frameIndex = swapChain->GetCurrentBackBufferIndex();
+	if (fenceValueForFrameBuffer[frameIndex] > lastCompletedFence) {
+		HRESULT hr = fence->SetEventOnCompletion(fenceValueForFrameBuffer[frameIndex], fenceEvent);
+		if (FAILED(hr)) {
+			running = false;
+		}
+		WaitForSingleObject(fenceEvent, INFINITE);
+	}
+}
+
+bool Engine::BeginRender(ID3D12PipelineState* pso)
+{
+	WaitForPreviousFrame();
+
+	// コマンドリスト及びコマンドアロケータをリセット.
+	HRESULT hr;
+	hr = commandAllocator[frameIndex]->Reset();
+	if (FAILED(hr)) {
+		running = false;
+	}
+
+	hr = prologueCommandList->Reset(commandAllocator[frameIndex].Get(), pso);
+	if (FAILED(hr)) {
+		running = false;
+	}
+	prologueCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(renderTargetList[frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+	hr = prologueCommandList->Close();
+	if (FAILED(hr)) {
+		running = false;
+	}
+
+	hr = epilogueCommandList->Reset(commandAllocator[frameIndex].Get(), pso);
+	if (FAILED(hr)) {
+		running = false;
+	}
+	epilogueCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(renderTargetList[frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+	hr = epilogueCommandList->Close();
+	if (FAILED(hr)) {
+		running = false;
+	}
+
+	hr = commandList->Reset(commandAllocator[frameIndex].Get(), pso);
+	if (FAILED(hr)) {
+		running = false;
+	}
+
+	// コマンドを積んでいく.
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	rtvHandle.ptr += frameIndex * rtvDescriptorSize;
+	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+	static const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+	commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+	commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+	return true;
+}
+
+bool Engine::EndRender(size_t num, ID3D12CommandList** pp)
+{
+	// 描画開始.
+	std::vector<ID3D12CommandList*> list;
+	list.reserve(3 + num);
+	list.push_back(prologueCommandList.Get());
+	list.push_back(commandList.Get());
+	for (size_t i = 0; i < num; ++i) {
+		list.push_back(pp[i]);
+	}
+	list.push_back(epilogueCommandList.Get());
+	commandQueue->ExecuteCommandLists(static_cast<UINT>(list.size()), list.data());
+	HRESULT hr = swapChain->Present(1, 0);
+	if (FAILED(hr)) {
+		running = false;
+	}
+
+	fenceValueForFrameBuffer[frameIndex] = masterFenceValue;
+	hr = commandQueue->Signal(fence.Get(), masterFenceValue);
+	if (FAILED(hr)) {
+		running = false;
+	}
+	++masterFenceValue;
+
+	return true;
+}
+
+bool Engine::ExecuteCommandList(size_t num, ID3D12CommandList** pp)
+{
+	std::vector<ID3D12CommandList*> list;
+	list.reserve(1 + num);
+	list.push_back(commandList.Get());
+	for (size_t i = 0; i < num; ++i) {
+		list.push_back(pp[i]);
+	}
+	commandQueue->ExecuteCommandLists(static_cast<UINT>(list.size()), list.data());
+	HRESULT hr = commandQueue->Signal(fence.Get(), masterFenceValue);
+	if (FAILED(hr)) {
+		return false;
+	}
+	fence->SetEventOnCompletion(masterFenceValue, fenceEvent);
+	WaitForSingleObject(fenceEvent, INFINITE);
+	++masterFenceValue;
+
+	return true;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE Engine::GetCurrentRTVHandle() const { return CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), frameIndex, rtvDescriptorSize); }
+D3D12_CPU_DESCRIPTOR_HANDLE Engine::GetCurrentDSVHandle() const { return dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(); }
