@@ -556,6 +556,8 @@ void Render(Direct3DStuff& d3dStuff)
 */
 void Update(Direct3DStuff& d3dStuff)
 {
+	d3dStuff.engine.Update();
+
 	DirectX::XMMATRIX viewMat = DirectX::XMLoadFloat4x4(&d3dStuff.matView);
 	DirectX::XMMATRIX projMat = DirectX::XMLoadFloat4x4(&d3dStuff.matProjection);
 
