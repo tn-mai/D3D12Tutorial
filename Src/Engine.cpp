@@ -580,7 +580,8 @@ void Engine::CreateEntity()
 	auto p = entityList.CreateScriptEntity(
 		DirectX::XMFLOAT3(0.5f, 0.5f, 0.5f),
 		animationData.GetData(0),
-		textureManager.GetTextureHandle(L"Res/playerunit.png")
+		textureManager.GetTextureHandle(L"Res/playerunit.png"),
+		GetActionList()
 	);
 }
 

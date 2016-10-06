@@ -11,10 +11,16 @@ void PlayerEntity::Update(float delta)
 	Entity::Update(delta);
 }
 
-ScriptEntity::ScriptEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex) : Entity(pos, p, tex) {}
+ScriptEntity::ScriptEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex, const ActionList*  act) :
+	Entity(pos, p, tex),
+	action(this)
+{
+	action.SetList(act);
+}
 
 void ScriptEntity::Update(float delta)
 {
+	action.Update(delta);
 	Entity::Update(delta);
 }
 
@@ -35,6 +41,11 @@ Entity::Entity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPT
 
 void Entity::Update(float delta)
 {
+	position.x += velocity.x;
+	position.y += velocity.y;
+	velocity.x += thrust.x;
+	velocity.y += thrust.y;
+
 	animation.Update(delta);
 }
 
@@ -60,9 +71,9 @@ PlayerEntity* EntityList::CreatePlayerEntity(DirectX::XMFLOAT3 pos, const Animat
 	return entity.get();
 }
 
-ScriptEntity* EntityList::CreateScriptEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex)
+ScriptEntity* EntityList::CreateScriptEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex, const ActionList* act)
 {
-	std::shared_ptr<ScriptEntity> entity(new ScriptEntity(pos, p, tex));
+	std::shared_ptr<ScriptEntity> entity(new ScriptEntity(pos, p, tex, act));
 	entityList.push_back(entity);
 	sorted = false;
 	return entity.get();
@@ -76,6 +87,13 @@ void EntityList::Update(float delta)
 	}
 	for (auto& e : entityList) {
 		e->Update(delta);
+	}
+	for (auto itr = entityList.begin(); itr != entityList.end();) {
+		if ((*itr)->state == Entity::State::AbortRequested) {
+			itr = entityList.erase(itr);
+		} else {
+			++itr;
+		}
 	}
 }
 

@@ -150,6 +150,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="Src\Action.h" />
     <ClInclude Include="Src\Animation.h" />
     <ClInclude Include="Src\AnimationData.h" />
     <ClInclude Include="Src\d3dx12.h" />
@@ -161,6 +162,7 @@
     <ClInclude Include="Src\Texture.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Src\Action.cpp" />
     <ClCompile Include="Src\Animation.cpp" />
     <ClCompile Include="Src\AnimationData.cpp" />
     <ClCompile Include="Src\Engine.cpp" />

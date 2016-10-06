@@ -38,6 +38,9 @@
     <ClInclude Include="Src\Entity.h">
       <Filter>Src</Filter>
     </ClInclude>
+    <ClInclude Include="Src\Action.h">
+      <Filter>Src</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Src\Main.cpp">
@@ -62,6 +65,9 @@
       <Filter>Src</Filter>
     </ClCompile>
     <ClCompile Include="Src\Entity.cpp">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="Src\Action.cpp">
       <Filter>Src</Filter>
     </ClCompile>
   </ItemGroup>

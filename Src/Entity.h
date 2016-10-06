@@ -41,6 +41,7 @@ public:
 	{
 		New,
 		Running,
+		AbortRequested,
 		Terminated,
 	};
 public:
@@ -82,11 +83,12 @@ private:
 class ScriptEntity : public Entity
 {
 public:
-	ScriptEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex);
+	ScriptEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex, const ActionList* act);
 	virtual void Update(float);
 	void Shot(int type, float dir, float speed);
+	void Abort() { state = State::AbortRequested; }
 private:
-//	ActionController action;
+	ActionController action;
 };
 
 class EntityList
@@ -94,7 +96,7 @@ class EntityList
 public:
 	EntityList();
 	PlayerEntity* CreatePlayerEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex);
-	ScriptEntity* CreateScriptEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex);
+	ScriptEntity* CreateScriptEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex, const ActionList* act);
 	void Update(float);
 	void Draw(SpriteRenderer&) const;
 private:
