@@ -7,6 +7,9 @@
 
 using Microsoft::WRL::ComPtr;
 
+/**
+* アップロード用コマンドリストを準備する.
+*/
 ResourceLoader ResourceLoader::Open(Microsoft::WRL::ComPtr<ID3D12Device> device)
 {
 	ResourceLoader rl;
@@ -24,6 +27,23 @@ ResourceLoader ResourceLoader::Open(Microsoft::WRL::ComPtr<ID3D12Device> device)
 	return rl;
 }
 
+/**
+* データをGPUにアップロードする
+*
+* @param buffer アップロード先のリソース情報を格納するオブジェクト.
+* @param desc 作成するリソースの詳細情報のアドレス.
+* @param data アップロードするデータのアドレス.
+* @param dataSize アップロードするデータのバイト数.
+* @param rowPitch アップロードするのが2, 3次元データの場合、その幅にあたるバイト数. 1次元データの場合はdataSizeと同じ値を指定する.
+* @param slicePitch アップロードするのが3次元データの場合、各平面のバイト数. 2次元データの場合はrowPitch、1次元データの場合はdataSizeと同じ値を指定する. 
+* @param finishState アップロード完了時のbufferの状態. リソースバリアを張るために使用される.
+*
+* @retval true アップロード成功.
+*              bufferのGetGPUAddress()によって、アップロード先のアドレスを得ることが出来る.
+*              実際にアップロードを行うには、コマンドリストをコマンドキューに入れて実行する必要があることに注意.
+* @retval false アップロード失敗.
+*               bufferは不完全な状態にある. 速やかに破棄すること.
+*/
 bool ResourceLoader::Upload(Microsoft::WRL::ComPtr<ID3D12Resource>& buffer, const D3D12_RESOURCE_DESC* desc, const void* data, size_t dataSize, int rowPitch, int slicePitch, D3D12_RESOURCE_STATES finishState)
 {
 	HRESULT hr = device->CreateCommittedResource(
@@ -64,11 +84,17 @@ bool ResourceLoader::Upload(Microsoft::WRL::ComPtr<ID3D12Resource>& buffer, cons
 	return true;
 }
 
+/**
+* アップロード用のコマンドリストを閉じる.
+*/
 bool ResourceLoader::Close()
 {
 	return SUCCEEDED(commandList->Close());
 }
 
+/**
+* アップロード用コマンドリストを取得する.
+*/
 ID3D12GraphicsCommandList* ResourceLoader::GetCommandList()
 {
 	return commandList.Get();

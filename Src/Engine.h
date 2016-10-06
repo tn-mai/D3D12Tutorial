@@ -12,8 +12,13 @@
 //#include "Entity.h"
 //#include "Font.h"
 
-typedef std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> UploadBufferList;
-
+/**
+* 頂点やインデックス、テクスチャなどのデータをVRAMに転送するためのヘルパークラス.
+* Open()でオブジェクトを作成し、必要なだけUploadを呼んだあとClose()する.
+* その後、GetCommandListで得られたコマンドリストをコマンドキューに渡すことで転送が行われる.
+* このクラスのオブジェクトは転送中の中間バッファを管理している.
+* そのため、転送完了まではオブジェクトを保持しておく必要がある.
+*/
 class ResourceLoader
 {
 public:
@@ -27,6 +32,8 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12Device> device;
 	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocator;
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commandList;
+
+	typedef std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> UploadBufferList;
 	UploadBufferList uploadBufferList;
 };
 
