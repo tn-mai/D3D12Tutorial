@@ -26,7 +26,16 @@
     <ClInclude Include="Src\Sprite.h">
       <Filter>Src</Filter>
     </ClInclude>
+    <ClInclude Include="Src\Animation.h">
+      <Filter>Src</Filter>
+    </ClInclude>
+    <ClInclude Include="Src\AnimationData.h">
+      <Filter>Src</Filter>
+    </ClInclude>
     <ClInclude Include="Src\Engine.h">
+      <Filter>Src</Filter>
+    </ClInclude>
+    <ClInclude Include="Src\Entity.h">
       <Filter>Src</Filter>
     </ClInclude>
   </ItemGroup>
@@ -43,7 +52,16 @@
     <ClCompile Include="Src\Sprite.cpp">
       <Filter>Src</Filter>
     </ClCompile>
+    <ClCompile Include="Src\Animation.cpp">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="Src\AnimationData.cpp">
+      <Filter>Src</Filter>
+    </ClCompile>
     <ClCompile Include="Src\Engine.cpp">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="Src\Entity.cpp">
       <Filter>Src</Filter>
     </ClCompile>
   </ItemGroup>

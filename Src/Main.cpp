@@ -484,6 +484,8 @@ bool Init3D(Direct3DStuff& d3dStuff, int width, int height, bool fullscreen, HWN
 		)
 	);
 
+	d3dStuff.engine.CreateEntity();
+
 	return true;
 }
 
@@ -541,14 +543,6 @@ void Render(Direct3DStuff& d3dStuff)
 	if (FAILED(hr)) {
 		d3dStuff.engine.StopRunning();
 	}
-
-	d3dStuff.engine.ClearSprite();
-	const SpriteCell sc = {
-		DirectX::XMFLOAT2(0.0f, 0.0f),
-		DirectX::XMFLOAT2(0.125f, 0.125f),
-		DirectX::XMFLOAT2(32.0f / d3dStuff.engine.GetWidth(), 32.0f / d3dStuff.engine.GetHeight())
-	};
-	d3dStuff.engine.AddSprite(sc, d3dStuff.engine.GetTextureHandle(spriteTextureName), DirectX::XMFLOAT3(0.5f, 0.5f, 0.5f));
 
 	// ƒtƒHƒ“ƒg‚ð•`‰æ.
 	d3dStuff.engine.ClearAllText();

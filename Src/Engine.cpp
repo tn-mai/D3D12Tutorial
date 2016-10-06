@@ -3,6 +3,7 @@
 */
 #include "Engine.h"
 #include "d3dx12.h"
+#include "AnimationData.h"
 #include <DirectXMath.h>
 
 using Microsoft::WRL::ComPtr;
@@ -415,7 +416,16 @@ bool Engine::Initialize(HWND hw, int w, int h, bool fs)
 	scissorRect.right = width;
 	scissorRect.bottom = height;
 
+	animationData.Init();
+
 	initialized = true;
+	return true;
+}
+
+bool Engine::Update()
+{
+	const float delta = 1.0f / 60.0f;
+	entityList.Update(delta);
 	return true;
 }
 
@@ -514,6 +524,8 @@ bool Engine::EndRender(size_t num, ID3D12CommandList** pp)
 		StopRunning();
 	}
 
+	spriteRenderer.ClearRenderingInfo();
+	entityList.Draw(spriteRenderer);
 	spriteRenderer.Draw(frameIndex, &rtvHandle, &dsvHandle, &viewport, &scissorRect);
 
 	// •`‰æŠJŽn.
@@ -561,6 +573,15 @@ bool Engine::ExecuteCommandList(size_t num, ID3D12CommandList** pp)
 	++masterFenceValue;
 
 	return true;
+}
+
+void Engine::CreateEntity()
+{
+	auto p = entityList.CreateScriptEntity(
+		DirectX::XMFLOAT3(0.5f, 0.5f, 0.5f),
+		animationData.GetData(0),
+		textureManager.GetTextureHandle(L"Res/playerunit.png")
+	);
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE Engine::GetCurrentRTVHandle() const { return CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), frameIndex, rtvDescriptorSize); }

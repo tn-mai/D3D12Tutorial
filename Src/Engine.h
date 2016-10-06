@@ -5,12 +5,13 @@
 #define TUTORIAL_SRC_ENGINE_H_
 #include "Texture.h"
 #include "Sprite.h"
+#include "Entity.h"
 #include "Font.h"
+#include "AnimationData.h"
 #include <wrl/client.h>
 #include <vector>
 #include <d3d12.h>
 #include <dxgi1_4.h>
-//#include "Entity.h"
 
 /**
 * 頂点やインデックス、テクスチャなどのデータをVRAMに転送するためのヘルパークラス.
@@ -79,6 +80,7 @@ public:
 
 	Engine();
 	bool Initialize(HWND hw, int w, int h, bool fs);
+	bool Update();
 	void Finalize();
 	void WaitForPreviousFrame();
 	bool BeginRender(ID3D12PipelineState*);
@@ -114,11 +116,7 @@ public:
 		textList.push_back({ text, pos, scale, color });
 	}
 
-	void ClearSprite() { spriteRenderer.ClearRenderingInfo(); }
-	void AddSprite(const SpriteCell& cell, D3D12_GPU_DESCRIPTOR_HANDLE srvHandle, DirectX::XMFLOAT3 pos, DirectX::XMFLOAT2 scale = { 1.0f, 1.0f }, float rot = 0.0f, DirectX::XMFLOAT4 color = { 1.0f, 1.0f, 1.0f, 1.0f })
-	{
-		spriteRenderer.AddRenderingInfo(cell, srvHandle, pos, scale, rot, color);
-	}
+	void CreateEntity();
 
 private:
 	int width;
@@ -165,8 +163,10 @@ private:
 	std::vector<TextInfo> textList;
 
 	SpriteRenderer spriteRenderer;
-	//EntityList entytyList;
+	EntityList entityList;
 	Texture::Manager  textureManager;
+
+	AnimationData animationData;
 };
 
 #endif // TUTORIAL_SRC_ENGINE_H_
