@@ -40,6 +40,8 @@ void AnimationController::Update(float delta)
 				--index;
 				flags |= Finish;
 			}
+		} else {
+			time = time - chip.time;
 		}
 	}
 }
