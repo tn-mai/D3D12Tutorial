@@ -23,6 +23,9 @@
     <ClInclude Include="Src\Font.h">
       <Filter>Src</Filter>
     </ClInclude>
+    <ClInclude Include="Src\Sprite.h">
+      <Filter>Src</Filter>
+    </ClInclude>
     <ClInclude Include="Src\Engine.h">
       <Filter>Src</Filter>
     </ClInclude>
@@ -35,6 +38,9 @@
       <Filter>Src</Filter>
     </ClCompile>
     <ClCompile Include="Src\Font.cpp">
+      <Filter>Src</Filter>
+    </ClCompile>
+    <ClCompile Include="Src\Sprite.cpp">
       <Filter>Src</Filter>
     </ClCompile>
     <ClCompile Include="Src\Engine.cpp">
@@ -54,12 +60,21 @@
     <FxCompile Include="Res\FontVertexShader.hlsl">
       <Filter>Res</Filter>
     </FxCompile>
+    <FxCompile Include="Res\SpritePixelShader.hlsl">
+      <Filter>Res</Filter>
+    </FxCompile>
+    <FxCompile Include="Res\SpriteVertexShader.hlsl">
+      <Filter>Res</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <Image Include="Res\rock_s.png">
       <Filter>Res</Filter>
     </Image>
     <Image Include="Res\ArialBlack.png">
+      <Filter>Res</Filter>
+    </Image>
+    <Image Include="Res\playerunit.png">
       <Filter>Res</Filter>
     </Image>
   </ItemGroup>

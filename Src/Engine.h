@@ -4,12 +4,12 @@
 #ifndef TUTORIAL_SRC_ENGINE_H_
 #define TUTORIAL_SRC_ENGINE_H_
 #include "Texture.h"
+#include "Sprite.h"
 #include "Font.h"
 #include <wrl/client.h>
 #include <vector>
 #include <d3d12.h>
 #include <dxgi1_4.h>
-//#include "Sprite.h"
 //#include "Entity.h"
 
 /**
@@ -114,6 +114,12 @@ public:
 		textList.push_back({ text, pos, scale, color });
 	}
 
+	void ClearSprite() { spriteRenderer.ClearRenderingInfo(); }
+	void AddSprite(const SpriteCell& cell, D3D12_GPU_DESCRIPTOR_HANDLE srvHandle, DirectX::XMFLOAT3 pos, DirectX::XMFLOAT2 scale = { 1.0f, 1.0f }, float rot = 0.0f, DirectX::XMFLOAT4 color = { 1.0f, 1.0f, 1.0f, 1.0f })
+	{
+		spriteRenderer.AddRenderingInfo(cell, srvHandle, pos, scale, rot, color);
+	}
+
 private:
 	int width;
 	int height;
@@ -158,7 +164,7 @@ private:
 	};
 	std::vector<TextInfo> textList;
 
-	//SpriteRenderer spriteRenderer;
+	SpriteRenderer spriteRenderer;
 	//EntityList entytyList;
 	Texture::Manager  textureManager;
 };

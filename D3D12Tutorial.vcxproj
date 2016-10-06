@@ -153,6 +153,7 @@
     <ClInclude Include="Src\d3dx12.h" />
     <ClInclude Include="Src\Engine.h" />
     <ClInclude Include="Src\Font.h" />
+    <ClInclude Include="Src\Sprite.h" />
     <ClInclude Include="Src\stdafx.h" />
     <ClInclude Include="Src\Texture.h" />
   </ItemGroup>
@@ -160,6 +161,7 @@
     <ClCompile Include="Src\Engine.cpp" />
     <ClCompile Include="Src\Font.cpp" />
     <ClCompile Include="Src\Main.cpp" />
+    <ClCompile Include="Src\Sprite.cpp" />
     <ClCompile Include="Src\Texture.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -181,6 +183,18 @@
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
     </FxCompile>
+    <FxCompile Include="Res\SpritePixelShader.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Res\SpriteVertexShader.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Vertex</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Vertex</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Vertex</ShaderType>
+    </FxCompile>
     <FxCompile Include="Res\VertexShader.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Vertex</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
@@ -190,6 +204,7 @@
   </ItemGroup>
   <ItemGroup>
     <Image Include="Res\ArialBlack.png" />
+    <Image Include="Res\playerunit.png" />
     <Image Include="Res\rock_s.png" />
   </ItemGroup>
   <ItemGroup>

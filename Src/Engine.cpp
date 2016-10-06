@@ -390,6 +390,11 @@ bool Engine::Initialize(HWND hw, int w, int h, bool fs)
 	if (!fontRenderer.Init(device, resourceLoader)) {
 		return false;
 	}
+
+	if (!spriteRenderer.Init(device, resourceLoader, frameBufferCount, 1024)) {
+		return false;
+	}
+
 	if (!resourceLoader.Close()) {
 		return false;
 	}
@@ -509,6 +514,8 @@ bool Engine::EndRender(size_t num, ID3D12CommandList** pp)
 		StopRunning();
 	}
 
+	spriteRenderer.Draw(frameIndex, &rtvHandle, &dsvHandle, &viewport, &scissorRect);
+
 	// •`‰æŠJŽn.
 	std::vector<ID3D12CommandList*> list;
 	list.reserve(3 + num);
@@ -517,6 +524,7 @@ bool Engine::EndRender(size_t num, ID3D12CommandList** pp)
 	for (size_t i = 0; i < num; ++i) {
 		list.push_back(pp[i]);
 	}
+	list.push_back(spriteRenderer.GetCommandList());
 	list.push_back(fontRenderer.GetCommandList());
 	list.push_back(epilogueCommandList.Get());
 	commandQueue->ExecuteCommandLists(static_cast<UINT>(list.size()), list.data());

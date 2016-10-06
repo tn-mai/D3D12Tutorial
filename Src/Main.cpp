@@ -13,6 +13,7 @@ using Microsoft::WRL::ComPtr;
 
 /// テクスチャ名.
 const wchar_t textureName[] = L"Res/rock_s.png";
+const wchar_t spriteTextureName[] = L"Res/playerunit.png";
 
 /**
 * Vertex構造体のレイアウト.
@@ -141,8 +142,6 @@ struct Direct3DStuff {
 	DirectX::XMFLOAT4 cameraUp;
 
 	ObjectState objectState[objectCount];
-
-	SpriteRenderer spriteRenderer;
 };
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -432,8 +431,7 @@ bool Init3D(Direct3DStuff& d3dStuff, int width, int height, bool fullscreen, HWN
 	if (!d3dStuff.engine.LoadTexture(resourceLoader, textureName)) {
 		return false;
 	}
-
-	if (!d3dStuff.spriteRenderer.Init(d3dStuff.engine.GetDevice(), resourceLoader, d3dStuff.frameBufferCount, 1024)) {
+	if (!d3dStuff.engine.LoadTexture(resourceLoader, spriteTextureName)) {
 		return false;
 	}
 
@@ -543,6 +541,14 @@ void Render(Direct3DStuff& d3dStuff)
 	if (FAILED(hr)) {
 		d3dStuff.engine.StopRunning();
 	}
+
+	d3dStuff.engine.ClearSprite();
+	const SpriteCell sc = {
+		DirectX::XMFLOAT2(0.0f, 0.0f),
+		DirectX::XMFLOAT2(0.125f, 0.125f),
+		DirectX::XMFLOAT2(32.0f / d3dStuff.engine.GetWidth(), 32.0f / d3dStuff.engine.GetHeight())
+	};
+	d3dStuff.engine.AddSprite(sc, d3dStuff.engine.GetTextureHandle(spriteTextureName), DirectX::XMFLOAT3(0.5f, 0.5f, 0.5f));
 
 	// フォントを描画.
 	d3dStuff.engine.ClearAllText();
