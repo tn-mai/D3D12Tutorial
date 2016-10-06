@@ -28,21 +28,21 @@ void AnimationController::Update(float delta)
 	if (flags & Finish) {
 		return;
 	}
-	const AnimationChip& chip = list->list[sequence].seq[index];
 	time += delta;
-	if (time >= chip.time) {
+	const AnimationChip* chip = &list->list[sequence].seq[index];
+	while (time >= chip->time) {
+		time -= chip->time;
 		++index;
 		if (index >= list->list[sequence].seq.size()) {
-			if (chip.flags & static_cast<int>(AnimationFlag::Loop)) {
+			if (chip->flags & static_cast<int>(AnimationFlag::Loop)) {
 				index = 0;
-				time = time - chip.time;
 			} else {
 				--index;
 				flags |= Finish;
 			}
-		} else {
-			time = time - chip.time;
+			break;
 		}
+		chip = &list->list[sequence].seq[index];
 	}
 }
 
