@@ -8,8 +8,6 @@
 
 using Microsoft::WRL::ComPtr;
 
-bool UploadToGpuMemory(ComPtr<ID3D12Resource>& buffer, ComPtr<ID3D12Resource>& uploadBuffer, ComPtr<ID3D12Device>& device, ComPtr<ID3D12GraphicsCommandList>& commandList, const D3D12_RESOURCE_DESC* desc, const void* data, size_t dataSize, int rowPitch, int slicePitch, D3D12_RESOURCE_STATES finishState, const wchar_t* bufferName = nullptr);
-
 namespace Texture {
 
 	namespace {

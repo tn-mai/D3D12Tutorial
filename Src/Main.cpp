@@ -306,63 +306,6 @@ bool LoadShader(const wchar_t* filename, const char* target, ComPtr<ID3DBlob>& b
 }
 
 /**
-* データをGPUにアップロードする
-*
-* @param buffer アップロード先のリソース情報を格納するオブジェクト.
-* @param uploadBuffer アップロード用の中間バッファの情報を格納するオブジェクト.
-*                     アップロード完了まで保持しなければならない.
-* @param d3dStuff Direct3D管理オブジェクト.
-*                 この関数はDirect3DStuffが保持するデバイスとコマンドリストを使用して、データのアップロードを行う.
-* @param desc 作成するリソースの詳細情報のアドレス.
-* @param data アップロードするデータのアドレス.
-* @param dataSize アップロードするデータのバイト数.
-*
-* @retval true アップロード成功.
-*              bufferのGetGPUAddress()によって、アップロード先のアドレスを得ることが出来る.
-*              実際にアップロードを行うには、コマンドリストをコマンドキューに入れて実行する必要があることに注意.
-* @retval false アップロード失敗.
-*               bufferは不完全な状態にある. 速やかに破棄すること.
-*/
-bool UploadToGpuMemory(ComPtr<ID3D12Resource>& buffer, ComPtr<ID3D12Resource>& uploadBuffer, ComPtr<ID3D12Device>& device, ComPtr<ID3D12GraphicsCommandList>& commandList, const D3D12_RESOURCE_DESC* desc, const void* data, size_t dataSize, int rowPitch, int slicePitch, D3D12_RESOURCE_STATES finishState, const wchar_t* bufferName = nullptr)
-{
-	HRESULT hr = device->CreateCommittedResource(
-		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-		D3D12_HEAP_FLAG_NONE,
-		desc,
-		D3D12_RESOURCE_STATE_COPY_DEST,
-		nullptr,
-		IID_PPV_ARGS(buffer.GetAddressOf())
-	);
-	if (FAILED(hr)) {
-		return false;
-	}
-	if (bufferName) {
-		buffer->SetName(bufferName);
-	}
-	hr = device->CreateCommittedResource(
-		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-		D3D12_HEAP_FLAG_NONE,
-		&CD3DX12_RESOURCE_DESC::Buffer(dataSize),
-		D3D12_RESOURCE_STATE_GENERIC_READ,
-		nullptr,
-		IID_PPV_ARGS(uploadBuffer.GetAddressOf())
-	);
-	if (FAILED(hr)) {
-		return false;
-	}
-	uploadBuffer->SetName((std::wstring(bufferName) + L" Uplaod Heap").c_str());
-	D3D12_SUBRESOURCE_DATA vertexData = {};
-	vertexData.pData = data;
-	vertexData.RowPitch = rowPitch;
-	vertexData.SlicePitch = slicePitch;
-	if (UpdateSubresources<1>(commandList.Get(), buffer.Get(), uploadBuffer.Get(), 0, 0, 1, &vertexData) == 0) {
-		return false;
-	}
-	commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(buffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, finishState));
-	return true;
-}
-
-/**
 * Direct3Dの初期化.
 *
 * @retval true 初期化成功.
