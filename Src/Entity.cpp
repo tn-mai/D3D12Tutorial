@@ -89,7 +89,14 @@ void EntityList::Draw(SpriteRenderer& renderer) const
 				DirectX::XMFLOAT2(chip->size),
 				DirectX::XMFLOAT2(chip->size),
 			};
-			renderer.AddRenderingInfo(cell, e->srvHandle, e->position, e->scale, e->rotation, e->color);
+			DirectX::XMFLOAT2 scale = e->scale;
+			if (chip->flags & static_cast<int>(AnimationFlag::HFlip)) {
+				scale.x *= -1.0f;
+			}
+			if (chip->flags & static_cast<int>(AnimationFlag::VFlip)) {
+				scale.y *= -1.0f;
+			}
+			renderer.AddRenderingInfo(cell, e->srvHandle, e->position, scale, e->rotation, e->color);
 		}
 	}
 }
