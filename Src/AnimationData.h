@@ -11,6 +11,7 @@ enum class PlayerAnimationId
 	Standard,
 	Left,
 	Right,
+	Explosion,
 };
 
 enum class PlayerShotAnimationId
@@ -21,6 +22,7 @@ enum class PlayerShotAnimationId
 enum class EnemyAnimationId
 {
 	Standard00,
+	Explosion,
 };
 
 enum class EnemyShotAnimationId
