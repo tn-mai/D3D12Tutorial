@@ -116,7 +116,8 @@ public:
 		textList.push_back({ text, pos, scale, color });
 	}
 
-	void CreateEntity();
+	void CreateEntity(int, DirectX::XMFLOAT3, AnimationDataNo, int);
+	void AddCollisionSolution(int g0, int g1, CollisionSolution func);
 
 private:
 	int width;

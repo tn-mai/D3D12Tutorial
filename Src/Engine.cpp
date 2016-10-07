@@ -575,14 +575,21 @@ bool Engine::ExecuteCommandList(size_t num, ID3D12CommandList** pp)
 	return true;
 }
 
-void Engine::CreateEntity()
+void Engine::CreateEntity(int groupId, DirectX::XMFLOAT3 pos, AnimationDataNo animeId, int actionId)
 {
 	auto p = entityList.CreateScriptEntity(
-		DirectX::XMFLOAT3(0.5f, 0.5f, 0.5f),
-		animationData.GetData(0),
+		groupId,
+		pos,
+		animationData.GetData(static_cast<int>(animeId)),
 		textureManager.GetTextureHandle(L"Res/playerunit.png"),
 		GetActionList()
 	);
+	p->SetAction(actionId);
+}
+
+void Engine::AddCollisionSolution(int g0, int g1, CollisionSolution func)
+{
+	entityList.AddCollisionSolution(g0, g1, func);
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE Engine::GetCurrentRTVHandle() const { return CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), frameIndex, rtvDescriptorSize); }

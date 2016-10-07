@@ -5,6 +5,83 @@
 #include "Sprite.h"
 #include <algorithm>
 
+bool CircleCircle(const Entity& a, const Entity& b)
+{
+	const float dx = a.position.x - b.position.x;
+	const float dy = a.position.y - b.position.y;
+	const float ra = a.collision.circle.radius;
+	const float rb = b.collision.circle.radius;
+	return (dx * dx + dy + dy) < (ra * ra + rb * rb);
+}
+
+bool RectCircle(const Entity& a, const Entity& b)
+{
+	const DirectX::XMFLOAT2 aLT(a.position.x + a.collision.rect.leftTop.x, a.position.y + a.collision.rect.leftTop.y);
+	const DirectX::XMFLOAT2 aRB(a.position.x + a.collision.rect.rightBottom.x, a.position.y + a.collision.rect.rightBottom.y);
+	DirectX::XMFLOAT2 p;
+	p.x = std::min(std::max(b.position.x, aLT.x), aRB.x);
+	p.y = std::min(std::max(b.position.y, aLT.y), aRB.y);
+	const float dx = p.x - b.position.x;
+	const float dy = p.y - b.position.y;
+	const float rb = b.collision.circle.radius;
+	return (dx * dx + dy * dy) < (rb * rb);
+}
+bool CircleRect(const Entity& a, const Entity& b) { return RectCircle(b, a); }
+
+bool RectRect(const Entity& a, const Entity& b)
+{
+	const DirectX::XMFLOAT2 aLT(a.position.x + a.collision.rect.leftTop.x, a.position.y + a.collision.rect.leftTop.y);
+	const DirectX::XMFLOAT2 aRB(a.position.x + a.collision.rect.rightBottom.x, a.position.y + a.collision.rect.rightBottom.y);
+	const DirectX::XMFLOAT2 bLT(b.position.x + b.collision.rect.leftTop.x, b.position.y + b.collision.rect.leftTop.y);
+	const DirectX::XMFLOAT2 bRB(b.position.x + b.collision.rect.rightBottom.x, b.position.y + b.collision.rect.rightBottom.y);
+	if (aRB.x < bLT.x || aLT.x > bRB.x) return false;
+	if (aRB.y < bLT.y || aLT.y > bRB.y) return false;
+	return true;
+}
+
+void CollisionDetector::AddSolution(uint32_t g0, uint32_t g1, CollisionSolution& func)
+{
+	solutionMap.insert({ static_cast<uint64_t>(g0) + (static_cast<uint64_t>(g1) << 32), func });
+	solutionMap.insert({ static_cast<uint64_t>(g1) + (static_cast<uint64_t>(g0) << 32), func });
+}
+
+void CollisionDetector::Detect(EntityLinkedList& lhs, EntityLinkedList& rhs)
+{
+	if (lhs.empty() || rhs.empty()) {
+		return;
+	}
+	CollisionSolution func;
+	{
+		const uint64_t gidLeft = lhs.front()->collision.groupId;
+		const uint64_t gidRight = rhs.front()->collision.groupId;
+		const uint64_t key = gidLeft + (gidRight << 32);
+		auto itr = solutionMap.find(key);
+		if (itr == solutionMap.end()) {
+			return;
+		}
+		func = itr->second;
+	}
+	static bool(*const funcList[2][2])(const Entity&, const Entity&) = {
+		{ CircleCircle, CircleRect },
+		{ RectCircle, RectRect },
+	};
+	for (auto itrLeft = lhs.begin(); itrLeft != lhs.end(); ++itrLeft) {
+		if ((*itrLeft)->state == Entity::State::AbortRequested) {
+			continue;
+		}
+		const int typeLeft = static_cast<int>((*itrLeft)->collision.type);
+		for (auto itrRight = rhs.begin(); itrRight != rhs.end(); ++itrRight) {
+			if ((*itrRight)->state == Entity::State::AbortRequested) {
+				continue;
+			}
+			const int typeRight = static_cast<int>((*itrRight)->collision.type);
+			if (funcList[typeLeft][typeRight](**itrLeft, **itrRight)) {
+				func(**itrLeft, **itrRight);
+			}
+		}
+	}
+}
+
 PlayerEntity::PlayerEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex) : Entity(pos, p, tex) {}
 
 void PlayerEntity::Update(float delta)
@@ -64,22 +141,31 @@ EntityList::EntityList() :
 {
 }
 
-PlayerEntity* EntityList::CreatePlayerEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex)
+PlayerEntity* EntityList::CreatePlayerEntity(int groupId, DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex)
 {
 	std::shared_ptr<PlayerEntity> entity(new PlayerEntity(pos, p, tex));
+	entity->collision.groupId = groupId;
+	entity->collision.circle.radius = 0.1f;
 	entityList.push_back(entity);
 	AddToCollisionGroup(entity);
 	sorted = false;
 	return entity.get();
 }
 
-ScriptEntity* EntityList::CreateScriptEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex, const ActionList* act)
+ScriptEntity* EntityList::CreateScriptEntity(int groupId, DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex, const ActionList* act)
 {
 	std::shared_ptr<ScriptEntity> entity(new ScriptEntity(pos, p, tex, act));
+	entity->collision.groupId = groupId;
+	entity->collision.circle.radius = 0.1f;
 	entityList.push_back(entity);
 	AddToCollisionGroup(entity);
 	sorted = false;
 	return entity.get();
+}
+
+void EntityList::AddCollisionSolution(int g0, int g1, CollisionSolution func)
+{
+	collisionDetector.AddSolution(g0, g1, func);
 }
 
 void EntityList::Update(float delta)
@@ -91,6 +177,15 @@ void EntityList::Update(float delta)
 	for (auto& e : entityList) {
 		e->Update(delta);
 	}
+	if (entityListForCollision.size() >= 2) {
+		auto end = entityListForCollision.end() - 1;
+		for (auto i = entityListForCollision.begin(); i != end; ++i) {
+			for (auto j = i + 1; j != entityListForCollision.end(); ++j) {
+				collisionDetector.Detect(*i, *j);
+			}
+		}
+	}
+
 	for (auto itr = entityList.begin(); itr != entityList.end();) {
 		if ((*itr)->state == Entity::State::AbortRequested) {
 			EntityLinkedList* group = FindCollisionGroup((*itr)->collision.groupId);
@@ -131,7 +226,7 @@ EntityList::EntityLinkedList* EntityList::FindCollisionGroup(int groupId)
 	auto group = std::find_if(
 		entityListForCollision.begin(),
 		entityListForCollision.end(),
-		[groupId](const EntityLinkedList& e) { return !e.empty() || (e.front()->collision.groupId == groupId); }
+		[groupId](const EntityLinkedList& e) { return !e.empty() && (e.front()->collision.groupId == groupId); }
 	);
 	if (group != entityListForCollision.end()) {
 		return &*group;

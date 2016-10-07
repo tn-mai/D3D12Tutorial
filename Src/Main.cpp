@@ -483,8 +483,18 @@ bool Init3D(Direct3DStuff& d3dStuff, int width, int height, bool fullscreen, HWN
 			)
 		)
 	);
-
-	d3dStuff.engine.CreateEntity();
+	d3dStuff.engine.AddCollisionSolution(0, 1, [&d3dStuff](Entity& a, Entity& b) {
+		if (a.collision.groupId == 1) {
+			d3dStuff.engine.CreateEntity(0, a.position, AnimationDataNo::Enemy, 3);
+		} else {
+			d3dStuff.engine.CreateEntity(0, b.position, AnimationDataNo::Enemy, 3);
+		}
+		a.state = Entity::State::AbortRequested;
+		b.state = Entity::State::AbortRequested;
+	});
+	d3dStuff.engine.CreateEntity(0, DirectX::XMFLOAT3(0.5f, 0.75f, 0.5f), AnimationDataNo::Player, 0);
+	d3dStuff.engine.CreateEntity(0, DirectX::XMFLOAT3(0.5f, 0.75f, 0.5f), AnimationDataNo::PlayerShot, 1);
+	d3dStuff.engine.CreateEntity(1, DirectX::XMFLOAT3(0.5f, 0.0f, 0.5f), AnimationDataNo::Enemy, 2);
 
 	return true;
 }

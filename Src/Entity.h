@@ -7,6 +7,7 @@
 #include "Action.h"
 #include <list>
 #include <vector>
+#include <map>
 #include <memory>
 #include <functional>
 #include <d3d12.h>
@@ -40,18 +41,17 @@ struct Collision
 	};
 };
 
+typedef std::shared_ptr<Entity> EntityPtr;
+typedef std::list<EntityPtr> EntityLinkedList;
+typedef std::function<void(Entity&, Entity&)> CollisionSolution;
+
 class CollisionDetector
 {
 public:
-	typedef std::function<void(Entity&, Entity&)> Func;
-	void AddSolution(uint32_t g0, uint32_t g1, Func& func) {}
-	template<typename Itr>
-	void Detect(Itr begin, Itr end)
-	{
-
-	}
+	void AddSolution(uint32_t g0, uint32_t g1, CollisionSolution& func);
+	void Detect(EntityLinkedList& lhs, EntityLinkedList& rhs);
 private:
-	std::map<uint64_t, Func> solutionMap;
+	std::map<uint64_t, CollisionSolution> solutionMap;
 };
 
 class Entity
@@ -91,7 +91,6 @@ public:
 
 	Collision collision;
 	ListItr collisionItr;
-	std::function<void(Entity&, Entity&)> collisionFunc;
 };
 
 /**
@@ -114,6 +113,7 @@ class ScriptEntity : public Entity
 public:
 	ScriptEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex, const ActionList* act);
 	virtual void Update(float);
+	void SetAction(int n) { action.SetSequence(n); }
 	void Shot(int type, float dir, float speed);
 	void Abort() { state = State::AbortRequested; }
 private:
@@ -124,8 +124,9 @@ class EntityList
 {
 public:
 	EntityList();
-	PlayerEntity* CreatePlayerEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex);
-	ScriptEntity* CreateScriptEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex, const ActionList* act);
+	PlayerEntity* CreatePlayerEntity(int groupId, DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex);
+	ScriptEntity* CreateScriptEntity(int groupId, DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex, const ActionList* act);
+	void AddCollisionSolution(int g0, int g1, CollisionSolution func);
 	void Update(float);
 	void Draw(SpriteRenderer&) const;
 
@@ -138,6 +139,7 @@ private:
 private:
 	EntityLinkedList entityList;
 	std::vector<EntityLinkedList> entityListForCollision;
+	CollisionDetector collisionDetector;
 	bool sorted;
 };
 
