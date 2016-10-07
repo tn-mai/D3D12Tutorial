@@ -3,6 +3,7 @@
 */
 #include "Entity.h"
 #include "Sprite.h"
+#include <algorithm>
 
 PlayerEntity::PlayerEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex) : Entity(pos, p, tex) {}
 
@@ -67,6 +68,7 @@ PlayerEntity* EntityList::CreatePlayerEntity(DirectX::XMFLOAT3 pos, const Animat
 {
 	std::shared_ptr<PlayerEntity> entity(new PlayerEntity(pos, p, tex));
 	entityList.push_back(entity);
+	AddToCollisionGroup(entity);
 	sorted = false;
 	return entity.get();
 }
@@ -75,6 +77,7 @@ ScriptEntity* EntityList::CreateScriptEntity(DirectX::XMFLOAT3 pos, const Animat
 {
 	std::shared_ptr<ScriptEntity> entity(new ScriptEntity(pos, p, tex, act));
 	entityList.push_back(entity);
+	AddToCollisionGroup(entity);
 	sorted = false;
 	return entity.get();
 }
@@ -82,7 +85,7 @@ ScriptEntity* EntityList::CreateScriptEntity(DirectX::XMFLOAT3 pos, const Animat
 void EntityList::Update(float delta)
 {
 	if (!sorted) {
-		entityList.sort([](const EntityPtr& lhs, const EntityPtr& rhs) { return lhs->GetPosition().z < rhs->GetPosition().z; });
+		entityList.sort([](const Entity::Ptr& lhs, const Entity::Ptr& rhs) { return lhs->GetPosition().z < rhs->GetPosition().z; });
 		sorted = true;
 	}
 	for (auto& e : entityList) {
@@ -90,6 +93,10 @@ void EntityList::Update(float delta)
 	}
 	for (auto itr = entityList.begin(); itr != entityList.end();) {
 		if ((*itr)->state == Entity::State::AbortRequested) {
+			EntityLinkedList* group = FindCollisionGroup((*itr)->collision.groupId);
+			if (group) {
+				group->erase((*itr)->collisionItr);
+			}
 			itr = entityList.erase(itr);
 		} else {
 			++itr;
@@ -119,3 +126,27 @@ void EntityList::Draw(SpriteRenderer& renderer) const
 	}
 }
 
+EntityList::EntityLinkedList* EntityList::FindCollisionGroup(int groupId)
+{
+	auto group = std::find_if(
+		entityListForCollision.begin(),
+		entityListForCollision.end(),
+		[groupId](const EntityLinkedList& e) { return !e.empty() || (e.front()->collision.groupId == groupId); }
+	);
+	if (group != entityListForCollision.end()) {
+		return &*group;
+	}
+	return nullptr;
+}
+
+void EntityList::AddToCollisionGroup(Entity::Ptr entity)
+{
+	EntityLinkedList* group = FindCollisionGroup(entity->collision.groupId);
+	if (!group) {
+		entityListForCollision.emplace_back();
+		group = &entityListForCollision.back();
+	}
+	group->push_back(entity);
+	entity->collisionItr = group->end();
+	--entity->collisionItr;
+}

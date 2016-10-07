@@ -3,14 +3,17 @@
 */
 #ifndef TUTORIAL_SRC_ENTITY_H_
 #define TUTORIAL_SRC_ENTITY_H_
-#include <DirectXMath.h>
 #include "Animation.h"
 #include "Action.h"
 #include <list>
+#include <vector>
 #include <memory>
+#include <functional>
 #include <d3d12.h>
+#include <DirectXMath.h>
 
 class SpriteRenderer;
+class Entity;
 
 enum class CollisionShapeType
 {
@@ -18,18 +21,37 @@ enum class CollisionShapeType
 	Rect,
 };
 
-union Collision
+struct Collision
 {
+	Collision() : type(CollisionShapeType::Circle), groupId(0), circle{ 0.1f } {}
+
 	CollisionShapeType type;
-	struct Circle
+	int groupId;
+	union {
+		struct Circle
+		{
+			float radius;
+		} circle;
+		struct Rect
+		{
+			DirectX::XMFLOAT2 leftTop;
+			DirectX::XMFLOAT2 rightBottom;
+		} rect;
+	};
+};
+
+class CollisionDetector
+{
+public:
+	typedef std::function<void(Entity&, Entity&)> Func;
+	void AddSolution(uint32_t g0, uint32_t g1, Func& func) {}
+	template<typename Itr>
+	void Detect(Itr begin, Itr end)
 	{
-		float radius;
-	} circle;
-	struct Rect
-	{
-		DirectX::XMFLOAT2 leftTop;
-		DirectX::XMFLOAT2 rightBottom;
-	} rect;
+
+	}
+private:
+	std::map<uint64_t, Func> solutionMap;
 };
 
 class Entity
@@ -53,7 +75,11 @@ public:
 	DirectX::XMFLOAT3 GetPosition() const { return position; }
 	
 public:
+	typedef std::shared_ptr<Entity> Ptr;
+	typedef std::list<Ptr>::iterator ListItr;
+
 	State state;
+
 	D3D12_GPU_DESCRIPTOR_HANDLE srvHandle;
 	DirectX::XMFLOAT3 position;
 	float rotation;
@@ -61,8 +87,11 @@ public:
 	DirectX::XMFLOAT2 velocity;
 	DirectX::XMFLOAT2 thrust;
 	DirectX::XMFLOAT4 color;
-	Collision collision;
 	AnimationController animation;
+
+	Collision collision;
+	ListItr collisionItr;
+	std::function<void(Entity&, Entity&)> collisionFunc;
 };
 
 /**
@@ -99,10 +128,16 @@ public:
 	ScriptEntity* CreateScriptEntity(DirectX::XMFLOAT3 pos, const AnimationList* p, D3D12_GPU_DESCRIPTOR_HANDLE tex, const ActionList* act);
 	void Update(float);
 	void Draw(SpriteRenderer&) const;
-private:
-	typedef std::shared_ptr<Entity> EntityPtr;
 
-	std::list<EntityPtr> entityList;
+private:
+	typedef std::list<Entity::Ptr> EntityLinkedList;
+
+	EntityLinkedList* FindCollisionGroup(int groupId);
+	void AddToCollisionGroup(Entity::Ptr);
+
+private:
+	EntityLinkedList entityList;
+	std::vector<EntityLinkedList> entityListForCollision;
 	bool sorted;
 };
 
