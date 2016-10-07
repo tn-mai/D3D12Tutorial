@@ -41,6 +41,9 @@ void ActionController::Update(float delta)
 	if (!entity || !list | (flags & Finish)) {
 		return;
 	}
+	if (entity->GetState() == Entity::State::AbortRequested) {
+		return;
+	}
 	time += delta;
 	for (;;) {
 		const Action& action = list->list[sequence].seq[index];
