@@ -4,7 +4,8 @@
 #include "Animation.h"
 
 AnimationController::AnimationController() :
-	list(nullptr)
+	list(nullptr),
+	flags(0)
 {
 }
 
@@ -18,7 +19,7 @@ void AnimationController::SetList(const AnimationList* p)
 void AnimationController::SetSequence(int seq)
 {
 	index = 0;
-	sequence = 0;
+	sequence = seq;
 	time = 0;
 	flags &= ~Finish;
 }
