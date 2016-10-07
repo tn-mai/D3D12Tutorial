@@ -260,7 +260,7 @@ bool SpriteRenderer::Draw(int frameIndex, const D3D12_CPU_DESCRIPTOR_HANDLE* rtv
 	commandList->RSSetViewports(1, viewport);
 	commandList->RSSetScissorRects(1, scissorRect);
 
-	std::stable_sort(renderingInfoList.begin(), renderingInfoList.end(), [](const RenderingInfo& lhs, const RenderingInfo& rhs) { return lhs.pos.z >= rhs.pos.z; });
+	std::stable_sort(renderingInfoList.begin(), renderingInfoList.end(), [](const RenderingInfo& lhs, const RenderingInfo& rhs) { return lhs.pos.z > rhs.pos.z; });
 
 	D3D12_GPU_DESCRIPTOR_HANDLE srvHandle = {};
 	int numGroupSprites = 0;
