@@ -454,6 +454,7 @@ bool Init3D(Direct3DStuff& d3dStuff, int width, int height, bool fullscreen, HWN
 	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 	psoDesc.NumRenderTargets = 1;
 	psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 	psoDesc.SampleDesc.Count = 1;
 	if (d3dStuff.engine.IsWarpDevice()) {
 		psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_TOOL_DEBUG;

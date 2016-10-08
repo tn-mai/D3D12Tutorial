@@ -253,6 +253,7 @@ bool FontRenderer::Init(Microsoft::WRL::ComPtr<ID3D12Device> device, ResourceLoa
 	fontPsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 	fontPsoDesc.NumRenderTargets = 1;
 	fontPsoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	fontPsoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 	fontPsoDesc.SampleDesc.Count = 1;
 	fontPsoDesc.BlendState.AlphaToCoverageEnable = FALSE;
 	fontPsoDesc.BlendState.IndependentBlendEnable = FALSE;
