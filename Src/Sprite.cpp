@@ -144,7 +144,7 @@ bool SpriteRenderer::Init(Microsoft::WRL::ComPtr<ID3D12Device> device, ResourceL
 	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 	psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
 	psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-	psoDesc.DepthStencilState.DepthEnable = FALSE;
+//	psoDesc.DepthStencilState.DepthEnable = FALSE;
 	psoDesc.InputLayout.pInputElementDescs = vertexLayout;
 	psoDesc.InputLayout.NumElements = _countof(vertexLayout);
 	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
@@ -165,6 +165,7 @@ bool SpriteRenderer::Init(Microsoft::WRL::ComPtr<ID3D12Device> device, ResourceL
 	if (FAILED(hr)) {
 		return false;
 	}
+	pso->SetName(L"Sprite PSO");
 
 	for (int i = 0; i < frameBufferCount; ++i) {
 		hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(frameResourceList[i].commandAllocator.GetAddressOf()));
@@ -240,7 +241,7 @@ void SpriteRenderer::AddRenderingInfo(const SpriteCell& cell, D3D12_GPU_DESCRIPT
 *
 * @param info 描画するスプライト情報.
 */
-bool SpriteRenderer::Draw(int frameIndex, const D3D12_CPU_DESCRIPTOR_HANDLE* rtvHandle, const D3D12_CPU_DESCRIPTOR_HANDLE* dsvHandle, const D3D12_VIEWPORT* viewport, const D3D12_RECT* scissorRect)
+bool SpriteRenderer::Draw(int frameIndex, ID3D12DescriptorHeap* descHeap, const D3D12_CPU_DESCRIPTOR_HANDLE* rtvHandle, const D3D12_CPU_DESCRIPTOR_HANDLE* dsvHandle, const D3D12_VIEWPORT* viewport, const D3D12_RECT* scissorRect)
 {
 	FrameResource& fr = frameResourceList[frameIndex];
 	HRESULT hr = fr.commandAllocator->Reset();
@@ -253,6 +254,8 @@ bool SpriteRenderer::Draw(int frameIndex, const D3D12_CPU_DESCRIPTOR_HANDLE* rtv
 	}
 
 	commandList->SetGraphicsRootSignature(rootSignature.Get());
+	ID3D12DescriptorHeap* heapList[] = { descHeap };
+	commandList->SetDescriptorHeaps(_countof(heapList), heapList);
 	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	commandList->IASetVertexBuffers(0, 1, &fr.vertexBufferView);
 	commandList->IASetIndexBuffer(&indexBufferView);

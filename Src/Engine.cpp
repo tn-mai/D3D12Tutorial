@@ -425,6 +425,13 @@ bool Engine::Initialize(HWND hw, int w, int h, bool fs)
 bool Engine::Update()
 {
 	const float delta = 1.0f / 60.0f;
+
+	while (HasWindowEvent()) {
+		WindowEvent event = PopWindowEvent();
+		for (auto listener : windowEventListenerList) {
+			listener->HandleEvent(event);
+		}
+	}
 	entityList.Update(delta);
 	return true;
 }
@@ -514,7 +521,7 @@ bool Engine::EndRender(size_t num, ID3D12CommandList** pp)
 {
 	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = GetCurrentRTVHandle();
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = GetCurrentDSVHandle();
-	if (!fontRenderer.Begin(&fontInfo, GetFrameIndex(), &rtvHandle, &dsvHandle, &viewport, &scissorRect)) {
+	if (!fontRenderer.Begin(&fontInfo, GetFrameIndex(), GetDescriptorHeap(), &rtvHandle, &dsvHandle, &viewport, &scissorRect)) {
 		StopRunning();
 	}
 	for (const auto& e : textList) {
@@ -526,7 +533,7 @@ bool Engine::EndRender(size_t num, ID3D12CommandList** pp)
 
 	spriteRenderer.ClearRenderingInfo();
 	entityList.Draw(spriteRenderer);
-	spriteRenderer.Draw(frameIndex, &rtvHandle, &dsvHandle, &viewport, &scissorRect);
+	spriteRenderer.Draw(frameIndex, GetDescriptorHeap(), &rtvHandle, &dsvHandle, &viewport, &scissorRect);
 
 	// •`‰æŠJŽn.
 	std::vector<ID3D12CommandList*> list;

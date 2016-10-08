@@ -199,7 +199,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prevInstance, PWSTR cmdLine, i
 		MessageBox(nullptr, L"ウィンドウクラスの登録に失敗", L"エラー", MB_OK | MB_ICONERROR);
 		return 0;
 	}
-	HWND hwnd = CreateWindowEx(0, windowName, windowTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height, nullptr, nullptr, instance, nullptr);
+	Direct3DStuff d3dStuff;
+	HWND hwnd = CreateWindowEx(0, windowName, windowTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height, nullptr, nullptr, instance, &d3dStuff);
 	if (!hwnd) {
 		MessageBox(nullptr, L"ウィンドウの作成に失敗", L"エラー", MB_OK | MB_ICONERROR);
 		return 0;
@@ -213,7 +214,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prevInstance, PWSTR cmdLine, i
 	ShowWindow(hwnd, cmdShow);
 	UpdateWindow(hwnd);
 
-	Direct3DStuff d3dStuff;
 	if (!Initialize(d3dStuff, width, height, fullScreen, hwnd)) {
 		MessageBox(nullptr, L"DirectXの初期化に失敗", L"エラー", MB_OK | MB_ICONERROR);
 		Finalize(d3dStuff);
@@ -241,6 +241,32 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prevInstance, PWSTR cmdLine, i
 	return 0;
 }
 
+WPARAM MapLeftRightKeys(WPARAM vk, LPARAM lParam)
+{
+	WPARAM new_vk = vk;
+	UINT scancode = (lParam & 0x00ff0000) >> 16;
+	int extended = (lParam & 0x01000000) != 0;
+
+	switch (vk) {
+	case VK_SHIFT:
+		new_vk = MapVirtualKey(scancode, MAPVK_VSC_TO_VK_EX);
+		break;
+	case VK_CONTROL:
+		new_vk = extended ? VK_RCONTROL : VK_LCONTROL;
+		break;
+	case VK_MENU:
+		new_vk = extended ? VK_RMENU : VK_LMENU;
+		break;
+	default:
+		// not a key we map from generic to left/right specialized
+		//  just return it.
+		new_vk = vk;
+		break;
+	}
+
+	return new_vk;
+}
+
 /**
 * ウィンドウプロシージャ.
 *
@@ -261,19 +287,47 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prevInstance, PWSTR cmdLine, i
 */
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-switch (msg) {
-case WM_KEYDOWN:
-	if (wParam == VK_ESCAPE) {
-		if (MessageBox(nullptr, L"終了しますか？", L"終了", MB_YESNO | MB_ICONQUESTION) == IDYES) {
-			DestroyWindow(hwnd);
-		}
+	// CreateWindowに渡したd3dStuffへのポインタを、ウィンドウのユーザーデータ領域にコピーする.
+	// lParamにLPCREATESTRUCTが渡されてくるのはWM_NCCREATE|WM_CREATEのときのみなので、いつでも
+	// 参照できるように、ウィンドウのユーザーデータ領域にコピーしている.
+	if (msg == WM_NCCREATE) {
+		LPCREATESTRUCT pCreateStruct = reinterpret_cast<LPCREATESTRUCT>(lParam);
+		SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreateStruct->lpCreateParams));
+		return DefWindowProcA(hwnd, msg, wParam, lParam);
 	}
-	return 0;
-case WM_DESTROY:
-	PostQuitMessage(0);
-	return 0;
-}
-return DefWindowProc(hwnd, msg, wParam, lParam);
+
+	Direct3DStuff* d3dStuff = reinterpret_cast<Direct3DStuff*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+	if (!d3dStuff) {
+		return DefWindowProcA(hwnd, msg, wParam, lParam);
+	}
+
+	switch (msg) {
+	case WM_KEYDOWN:
+	case WM_SYSKEYDOWN:
+	case WM_KEYUP:
+	case WM_SYSKEYUP: {
+		if (wParam == VK_ESCAPE) {
+			if (MessageBox(nullptr, L"終了しますか？", L"終了", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+				DestroyWindow(hwnd);
+			}
+		}
+
+		const bool down = (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN);
+		WindowEvent event = {};
+		event.keycode = MapLeftRightKeys(wParam, lParam);
+		event.flags |= down ? WindowEvent::KeyDown : WindowEvent::KeyUp;
+		event.flags |= HIWORD(GetAsyncKeyState(VK_MENU)) ? WindowEvent::Alt : 0;
+		event.flags |= HIWORD(GetAsyncKeyState(VK_CONTROL)) ? WindowEvent::Ctrl : 0;
+		event.flags |= HIWORD(GetAsyncKeyState(VK_SHIFT)) ? WindowEvent::Shift : 0;
+		event.flags |= (HIWORD(GetAsyncKeyState(VK_LWIN)) || HIWORD(GetAsyncKeyState(VK_RWIN))) ? WindowEvent::System : 0;
+		d3dStuff->engine.PushWindowEvent(event);
+		break;
+	}
+	case WM_DESTROY:
+		PostQuitMessage(0);
+		return 0;
+	}
+	return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
 /**

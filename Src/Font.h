@@ -62,7 +62,7 @@ class FontRenderer
 public:
 	FontRenderer();
 	bool Init(Microsoft::WRL::ComPtr<ID3D12Device>, ResourceLoader&);
-	bool Begin(const Font*, int, const D3D12_CPU_DESCRIPTOR_HANDLE*, const D3D12_CPU_DESCRIPTOR_HANDLE*, const D3D12_VIEWPORT*, const D3D12_RECT*);
+	bool Begin(const Font*, int, ID3D12DescriptorHeap* descHeap, const D3D12_CPU_DESCRIPTOR_HANDLE*, const D3D12_CPU_DESCRIPTOR_HANDLE*, const D3D12_VIEWPORT*, const D3D12_RECT*);
 	void Draw(const std::wstring&, DirectX::XMFLOAT2 pos, DirectX::XMFLOAT2 scale = { 1.0f, 1.0f }, DirectX::XMFLOAT4 color = { 1.0f, 1.0f, 1.0f, 1.0f });
 	bool End();
 	ID3D12GraphicsCommandList* GetCommandList();

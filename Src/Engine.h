@@ -10,8 +10,29 @@
 #include "AnimationData.h"
 #include <wrl/client.h>
 #include <vector>
+#include <deque>
 #include <d3d12.h>
 #include <dxgi1_4.h>
+
+struct WindowEvent
+{
+	enum {
+		Alt = 0x01,
+		Ctrl = 0x02,
+		Shift = 0x04,
+		System = 0x08,
+
+		KeyDown = 0x10,
+		KeyUp = 0x20,
+	};
+	int keycode;
+	int flags;
+};
+
+struct WindowEventListener
+{
+	virtual void HandleEvent(WindowEvent) = 0;
+};
 
 /**
 * 頂点やインデックス、テクスチャなどのデータをVRAMに転送するためのヘルパークラス.
@@ -104,6 +125,14 @@ public:
 	const D3D12_VIEWPORT& GetViewport() const { return viewport; }
 	const D3D12_RECT& GetScissorRect() const { return scissorRect; }
 
+	void PushWindowEvent(WindowEvent& e) { windowEventQueue.push_back(e); }
+	bool HasWindowEvent() { return !windowEventQueue.empty(); }
+	WindowEvent PopWindowEvent() {
+		WindowEvent e = windowEventQueue.front();
+		windowEventQueue.pop_front();
+		return e;
+	}
+
 	bool LoadTexture(ResourceLoader& resourceLoader, const wchar_t* filename) { return textureManager.LoadFromFile(resourceLoader, filename); }
 	D3D12_GPU_DESCRIPTOR_HANDLE GetTextureHandle(const wchar_t* filename) const { return textureManager.GetTextureHandle(filename); }
 	DXGI_FORMAT GetTextureFormat(const wchar_t* filename) const { return textureManager.GetTextureFormat(filename); }
@@ -168,6 +197,9 @@ private:
 	Texture::Manager  textureManager;
 
 	AnimationData animationData;
+
+	std::deque<WindowEvent> windowEventQueue;
+	std::vector<WindowEventListener*> windowEventListenerList;
 };
 
 #endif // TUTORIAL_SRC_ENGINE_H_

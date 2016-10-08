@@ -45,7 +45,7 @@ public:
 
 	void ClearRenderingInfo();
 	void AddRenderingInfo(const SpriteCell& cell, D3D12_GPU_DESCRIPTOR_HANDLE srvHandle, DirectX::XMFLOAT3 pos, DirectX::XMFLOAT2 scale = { 1.0f, 1.0f }, float rot = 0.0f, DirectX::XMFLOAT4 color = { 1.0f, 1.0f, 1.0f, 1.0f });
-	bool Draw(int, const D3D12_CPU_DESCRIPTOR_HANDLE*, const D3D12_CPU_DESCRIPTOR_HANDLE*, const D3D12_VIEWPORT*, const D3D12_RECT*);
+	bool Draw(int, ID3D12DescriptorHeap* descHeap, const D3D12_CPU_DESCRIPTOR_HANDLE*, const D3D12_CPU_DESCRIPTOR_HANDLE*, const D3D12_VIEWPORT*, const D3D12_RECT*);
 	ID3D12GraphicsCommandList* GetCommandList();
 
 private:

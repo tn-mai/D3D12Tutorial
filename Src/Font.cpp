@@ -268,6 +268,7 @@ bool FontRenderer::Init(Microsoft::WRL::ComPtr<ID3D12Device> device, ResourceLoa
 	if (FAILED(hr)) {
 		return false;
 	}
+	fontPSO->SetName(L"Font PSO");
 
 	for (int i = 0; i < frameBufferCount; ++i) {
 		hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(commandAllocator[i].GetAddressOf()));
@@ -393,7 +394,7 @@ void FontRenderer::Draw(const std::wstring& text, DirectX::XMFLOAT2 pos, DirectX
 /**
 * 描画に使用するフォントを指定する.
 */
-bool FontRenderer::Begin(const Font* p, int fi, const D3D12_CPU_DESCRIPTOR_HANDLE* rtvHandle, const D3D12_CPU_DESCRIPTOR_HANDLE* dsvHandle, const D3D12_VIEWPORT* viewport, const D3D12_RECT* scissorRect)
+bool FontRenderer::Begin(const Font* p, int fi, ID3D12DescriptorHeap* descHeap, const D3D12_CPU_DESCRIPTOR_HANDLE* rtvHandle, const D3D12_CPU_DESCRIPTOR_HANDLE* dsvHandle, const D3D12_VIEWPORT* viewport, const D3D12_RECT* scissorRect)
 {
 	fontInfo = p;
 	frameIndex = fi;
@@ -409,10 +410,12 @@ bool FontRenderer::Begin(const Font* p, int fi, const D3D12_CPU_DESCRIPTOR_HANDL
 	}
 
 	commandList->SetGraphicsRootSignature(rootSignature.Get());
+	ID3D12DescriptorHeap* heapList[] = { descHeap };
+	commandList->SetDescriptorHeaps(_countof(heapList), heapList);
+	commandList->SetGraphicsRootDescriptorTable(0, fontInfo->srvHandle);
 	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	commandList->IASetVertexBuffers(0, 1, &fontVertexBufferView[frameIndex]);
 	commandList->IASetIndexBuffer(&fontIndexBufferView);
-	commandList->SetGraphicsRootDescriptorTable(0, fontInfo->srvHandle);
 	commandList->OMSetRenderTargets(1, rtvHandle, FALSE, dsvHandle);
 	commandList->RSSetViewports(1, viewport);
 	commandList->RSSetScissorRects(1, scissorRect);
